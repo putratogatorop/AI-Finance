@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Environment
+.env
+
+# Data lake (large files, don't commit)
+data/raw/hourly/
+data/raw/daily/
+data/raw/fundamentals/
+data/raw/index/
+
+# ML models
+models/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js
+services/nextjs/node_modules/
+services/nextjs/.next/
