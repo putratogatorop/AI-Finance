@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import ccxt
 
@@ -14,7 +14,7 @@ class BinanceClient:
 
     def parse_ohlcv_row(self, raw: list) -> dict:
         timestamp_ms, open_price, high, low, close, volume = raw
-        dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+        dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
         return {
             "timestamp": dt.isoformat(),
             "open": open_price,

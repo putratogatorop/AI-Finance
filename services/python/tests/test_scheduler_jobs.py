@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,7 +18,10 @@ def mock_deps():
 
 def test_hourly_job_fetches_and_stores(mock_deps):
     mock_deps["binance_client"].fetch_hourly_ohlcv.return_value = [
-        {"timestamp": "2026-03-30T10:00:00+00:00", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100.0}
+        {
+            "timestamp": "2026-03-30T10:00:00+00:00",
+            "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100.0,
+        }
     ]
     runner = JobRunner(**mock_deps)
     runner.run_hourly_ingestion()

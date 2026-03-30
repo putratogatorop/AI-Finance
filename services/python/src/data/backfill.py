@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.data.binance_client import BinanceClient
 from src.data.csv_storage import CsvStorage
@@ -28,7 +28,7 @@ class Backfiller:
         total_saved = 0
         for date_str in dates:
             try:
-                dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
                 rows = self.binance.fetch_historical_hourly(asset, since=dt, limit=24)
                 if rows:
                     date_rows: dict[str, list[dict]] = {}

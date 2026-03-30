@@ -1,6 +1,5 @@
 import logging
 import signal
-import sys
 import threading
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -45,9 +44,19 @@ def main() -> None:
         )
 
         scheduler = BackgroundScheduler()
-        scheduler.add_job(job_runner.run_hourly_ingestion, "interval", hours=1, id="hourly_ingestion")
-        scheduler.add_job(job_runner.run_daily_aggregation, "cron", hour=0, minute=30, id="daily_aggregation")
-        scheduler.add_job(job_runner.run_weekly_fundamentals, "cron", day_of_week="sun", hour=1, id="weekly_fundamentals")
+        scheduler.add_job(
+            job_runner.run_hourly_ingestion, "interval", hours=1, id="hourly_ingestion"
+        )
+        scheduler.add_job(
+            job_runner.run_daily_aggregation, "cron", hour=0, minute=30, id="daily_aggregation"
+        )
+        scheduler.add_job(
+            job_runner.run_weekly_fundamentals,
+            "cron",
+            day_of_week="sun",
+            hour=1,
+            id="weekly_fundamentals",
+        )
         scheduler.start()
         logger.info("Scheduler started with hourly, daily, and weekly jobs")
 

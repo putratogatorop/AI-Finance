@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -24,7 +24,7 @@ class EtlPipeline:
         for _, row in df.iterrows():
             ts = pd.Timestamp(row["timestamp"]).to_pydatetime()
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
 
             exists = (
                 self.session.query(AssetPriceHourly)
@@ -48,12 +48,14 @@ class EtlPipeline:
         return loaded
 
     def aggregate_daily(self, asset: str, date: str) -> None:
+        day_start = pd.Timestamp(f"{date}T00:00:00+00:00").to_pydatetime()
+        day_end = day_start + pd.Timedelta(days=1)
         hourly_rows = (
             self.session.query(AssetPriceHourly)
             .filter(
                 AssetPriceHourly.asset == asset,
-                AssetPriceHourly.timestamp >= pd.Timestamp(f"{date}T00:00:00+00:00").to_pydatetime(),
-                AssetPriceHourly.timestamp < pd.Timestamp(f"{date}T00:00:00+00:00").to_pydatetime() + pd.Timedelta(days=1),
+                AssetPriceHourly.timestamp >= day_start,
+                AssetPriceHourly.timestamp < day_end,
             )
             .order_by(AssetPriceHourly.timestamp)
             .all()

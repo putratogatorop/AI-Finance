@@ -1,6 +1,4 @@
-from datetime import datetime, timezone
 
-import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -38,8 +36,16 @@ def etl(csv_storage, db_session):
 
 def test_load_hourly_csv_to_db(etl, csv_storage, db_session):
     rows = [
-        {"timestamp": "2026-03-30T10:00:00+00:00", "open": 70000.0, "high": 70500.0, "low": 69800.0, "close": 70200.0, "volume": 1500.5},
-        {"timestamp": "2026-03-30T11:00:00+00:00", "open": 70200.0, "high": 70800.0, "low": 70100.0, "close": 70600.0, "volume": 1200.3},
+        {
+            "timestamp": "2026-03-30T10:00:00+00:00",
+            "open": 70000.0, "high": 70500.0, "low": 69800.0,
+            "close": 70200.0, "volume": 1500.5,
+        },
+        {
+            "timestamp": "2026-03-30T11:00:00+00:00",
+            "open": 70200.0, "high": 70800.0, "low": 70100.0,
+            "close": 70600.0, "volume": 1200.3,
+        },
     ]
     csv_storage.save_hourly("BTC", "2026-03-30", rows)
     loaded = etl.load_hourly("BTC", "2026-03-30")
@@ -52,7 +58,11 @@ def test_load_hourly_csv_to_db(etl, csv_storage, db_session):
 
 def test_load_hourly_deduplicates(etl, csv_storage, db_session):
     rows = [
-        {"timestamp": "2026-03-30T10:00:00+00:00", "open": 70000.0, "high": 70500.0, "low": 69800.0, "close": 70200.0, "volume": 1500.5},
+        {
+            "timestamp": "2026-03-30T10:00:00+00:00",
+            "open": 70000.0, "high": 70500.0, "low": 69800.0,
+            "close": 70200.0, "volume": 1500.5,
+        },
     ]
     csv_storage.save_hourly("BTC", "2026-03-30", rows)
     etl.load_hourly("BTC", "2026-03-30")
@@ -63,8 +73,16 @@ def test_load_hourly_deduplicates(etl, csv_storage, db_session):
 
 def test_aggregate_hourly_to_daily(etl, csv_storage, db_session):
     rows = [
-        {"timestamp": "2026-03-30T00:00:00+00:00", "open": 70000.0, "high": 70500.0, "low": 69800.0, "close": 70200.0, "volume": 1000.0},
-        {"timestamp": "2026-03-30T01:00:00+00:00", "open": 70200.0, "high": 71000.0, "low": 69500.0, "close": 70800.0, "volume": 2000.0},
+        {
+            "timestamp": "2026-03-30T00:00:00+00:00",
+            "open": 70000.0, "high": 70500.0, "low": 69800.0,
+            "close": 70200.0, "volume": 1000.0,
+        },
+        {
+            "timestamp": "2026-03-30T01:00:00+00:00",
+            "open": 70200.0, "high": 71000.0, "low": 69500.0,
+            "close": 70800.0, "volume": 2000.0,
+        },
     ]
     csv_storage.save_hourly("BTC", "2026-03-30", rows)
     etl.load_hourly("BTC", "2026-03-30")

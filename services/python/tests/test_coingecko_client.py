@@ -11,8 +11,24 @@ def client():
 
 
 MOCK_MARKET_DATA = [
-    {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin", "market_cap": 1_400_000_000_000, "market_cap_rank": 1, "total_volume": 35_000_000_000, "circulating_supply": 19_800_000},
-    {"id": "ethereum", "symbol": "eth", "name": "Ethereum", "market_cap": 400_000_000_000, "market_cap_rank": 2, "total_volume": 15_000_000_000, "circulating_supply": 120_000_000},
+    {
+        "id": "bitcoin",
+        "symbol": "btc",
+        "name": "Bitcoin",
+        "market_cap": 1_400_000_000_000,
+        "market_cap_rank": 1,
+        "total_volume": 35_000_000_000,
+        "circulating_supply": 19_800_000,
+    },
+    {
+        "id": "ethereum",
+        "symbol": "eth",
+        "name": "Ethereum",
+        "market_cap": 400_000_000_000,
+        "market_cap_rank": 2,
+        "total_volume": 15_000_000_000,
+        "circulating_supply": 120_000_000,
+    },
 ]
 
 

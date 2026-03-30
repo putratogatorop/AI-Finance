@@ -1,12 +1,19 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from src.db.models import AssetPriceHourly, AssetPriceDaily, AssetFundamental, Signal, Portfolio, AuditLog
+from src.db.models import (
+    AssetFundamental,
+    AssetPriceDaily,
+    AssetPriceHourly,
+    AuditLog,
+    Portfolio,
+    Signal,
+)
 
 
 def test_insert_hourly_price(db_session):
     price = AssetPriceHourly(
         asset="BTC",
-        timestamp=datetime(2026, 3, 30, 10, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 3, 30, 10, 0, tzinfo=UTC),
         open=70000.0,
         high=70500.0,
         low=69800.0,
@@ -24,7 +31,7 @@ def test_insert_hourly_price(db_session):
 def test_insert_daily_price(db_session):
     price = AssetPriceDaily(
         asset="ETH",
-        date=datetime(2026, 3, 30, tzinfo=timezone.utc),
+        date=datetime(2026, 3, 30, tzinfo=UTC),
         open=3500.0, high=3600.0, low=3450.0, close=3550.0, volume=25000.0,
     )
     db_session.add(price)
@@ -37,7 +44,7 @@ def test_insert_daily_price(db_session):
 def test_insert_fundamental(db_session):
     fund = AssetFundamental(
         asset="BTC",
-        fetched_at=datetime(2026, 3, 30, tzinfo=timezone.utc),
+        fetched_at=datetime(2026, 3, 30, tzinfo=UTC),
         market_cap=1_400_000_000_000.0,
         market_cap_rank=1,
         total_volume_24h=35_000_000_000.0,
@@ -56,7 +63,7 @@ def test_insert_signal(db_session):
         asset="ETH", action="BUY", confidence=0.84,
         suggested_hold_days=18, stop_loss_pct=-8.0,
         expected_return_pct=12.0, model_agreement="3/3",
-        created_at=datetime(2026, 3, 30, tzinfo=timezone.utc),
+        created_at=datetime(2026, 3, 30, tzinfo=UTC),
     )
     db_session.add(signal)
     db_session.commit()
@@ -71,7 +78,7 @@ def test_insert_portfolio(db_session):
         asset="SOL", action="BUY", entry_price=180.0,
         entry_amount_idr=1_000_000, quantity=5555.56,
         stop_loss_price=165.6, status="open",
-        opened_at=datetime(2026, 3, 30, tzinfo=timezone.utc),
+        opened_at=datetime(2026, 3, 30, tzinfo=UTC),
     )
     db_session.add(position)
     db_session.commit()
@@ -85,7 +92,7 @@ def test_insert_audit_log(db_session):
     log = AuditLog(
         event_type="signal_generated", asset="ETH",
         details='{"action": "BUY", "confidence": 0.84}',
-        created_at=datetime(2026, 3, 30, tzinfo=timezone.utc),
+        created_at=datetime(2026, 3, 30, tzinfo=UTC),
     )
     db_session.add(log)
     db_session.commit()

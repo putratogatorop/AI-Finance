@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.data.binance_client import BinanceClient
 from src.data.coingecko_client import CoinGeckoClient
@@ -19,7 +19,7 @@ class JobRunner:
         self.assets = assets
 
     def run_hourly_ingestion(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date_str = now.strftime("%Y-%m-%d")
         logger.info(f"Starting hourly ingestion for {len(self.assets)} assets")
         for asset in self.assets:
@@ -32,7 +32,7 @@ class JobRunner:
                 logger.exception(f"Hourly ingestion failed for {asset}")
 
     def run_daily_aggregation(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date_str = now.strftime("%Y-%m-%d")
         logger.info(f"Starting daily aggregation for {len(self.assets)} assets")
         for asset in self.assets:
@@ -42,7 +42,7 @@ class JobRunner:
                 logger.exception(f"Daily aggregation failed for {asset}")
 
     def run_weekly_fundamentals(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date_str = now.strftime("%Y-%m-%d")
         logger.info("Starting weekly fundamentals refresh")
         try:

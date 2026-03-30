@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pycoingecko import CoinGeckoAPI
 
@@ -27,7 +27,7 @@ class CoinGeckoClient:
         symbol = self.id_to_asset(raw["id"])
         return {
             "asset": symbol,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(UTC).isoformat(),
             "market_cap": raw.get("market_cap"),
             "market_cap_rank": raw.get("market_cap_rank"),
             "total_volume_24h": raw.get("total_volume"),
@@ -36,11 +36,19 @@ class CoinGeckoClient:
         }
 
     def fetch_top_n_assets(self, n: int = 20) -> list[str]:
-        markets = self.cg.get_coins_markets(vs_currency="usd", order="market_cap_desc", per_page=n, page=1)
+        markets = self.cg.get_coins_markets(
+            vs_currency="usd", order="market_cap_desc", per_page=n, page=1
+        )
         return [self.id_to_asset(coin["id"]) for coin in markets]
 
     def fetch_fundamentals(self, assets: list[str]) -> list[dict]:
         ids = [self.asset_to_id(a) for a in assets]
         ids_str = ",".join(ids)
-        markets = self.cg.get_coins_markets(vs_currency="usd", ids=ids_str, order="market_cap_desc", per_page=len(assets), page=1)
+        markets = self.cg.get_coins_markets(
+            vs_currency="usd",
+            ids=ids_str,
+            order="market_cap_desc",
+            per_page=len(assets),
+            page=1,
+        )
         return [self.parse_market_data(coin) for coin in markets]
