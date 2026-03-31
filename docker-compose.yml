@@ -29,8 +29,17 @@ services:
     build:
       context: ./services/nextjs
       dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aifinance}:${POSTGRES_PASSWORD:-aifinance_dev}@postgres:5432/${POSTGRES_DB:-aifinance}
     ports:
       - "3000:3000"
+    volumes:
+      - ./services/nextjs/src:/app/src
+      - ./services/nextjs/prisma:/app/prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:

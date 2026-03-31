@@ -1,10 +1,41 @@
-FROM node:20-alpine
+FROM node:20-alpine AS base
 
+# --- Dependencies stage ---
+FROM base AS deps
 WORKDIR /app
 
-# Placeholder — will be built out in Plan 3 (Dashboard)
-RUN echo '{"name":"ai-finance-dashboard","version":"0.1.0","scripts":{"dev":"echo Dashboard placeholder - see Plan 3"}}' > package.json
+COPY package.json ./
+RUN npm install --frozen-lockfile 2>/dev/null || npm install
+
+# --- Builder stage ---
+FROM base AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+RUN npx prisma generate
+RUN npm run build
+
+# --- Runner stage ---
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
 
-CMD ["echo", "Next.js dashboard placeholder - implement in Plan 3"]
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

@@ -15,8 +15,8 @@ data/raw/daily/
 data/raw/fundamentals/
 data/raw/index/
 
-# ML models
-models/
+# ML model weights (saved checkpoints, not source code)
+/models/
 
 # IDE
 .vscode/
@@ -32,3 +32,5 @@ Thumbs.db
 # Next.js
 services/nextjs/node_modules/
 services/nextjs/.next/
+services/nextjs/coverage/
+services/nextjs/next-env.d.ts
