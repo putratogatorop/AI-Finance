@@ -52,6 +52,11 @@ class RLDataLoader:
             return None
 
         df = pd.concat(frames, ignore_index=True)
+
+        # Filter valid timestamps (2020-01-01 to 2027-01-01 in ms)
+        df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
+        df = df[df["open_time"].between(1_577_836_800_000, 1_798_761_600_000)]
+
         df = df.sort_values("open_time").drop_duplicates(subset="open_time").reset_index(drop=True)
 
         # Keep only the columns we need
@@ -150,6 +155,11 @@ class RLDataLoader:
             # Combine feature columns + cross-token columns
             all_feat_cols = feature_cols + list(cross_df.columns)
             combined = pd.concat([feat_df[feature_cols], cross_df], axis=1)
+
+            # Skip alts that lost too many rows to feature warmup
+            if n_feat < 3000:
+                logger.debug("Skipping %s — only %d rows after features (need 3000+)", symbol, n_feat)
+                continue
 
             alt_feature_arrays.append(combined.values)
             alt_price_arrays.append(

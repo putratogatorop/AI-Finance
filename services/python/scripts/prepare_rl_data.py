@@ -5,9 +5,14 @@ Output: data/features/rl_dataset.npz
 """
 
 import logging
+import sys
 import time
 from pathlib import Path
+
 import numpy as np
+
+sys.path.insert(0, ".")
+
 from src.rl.data_loader import RLDataLoader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
