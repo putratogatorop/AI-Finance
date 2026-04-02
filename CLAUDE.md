@@ -4,7 +4,8 @@
 
 - User has **Colab Pro** subscription. Use it for heavy computation (ML training, large data processing, anything GPU-bound).
 - **Never** suggest running training locally — always offload to Colab.
-- **VS Code + Colab kernel** is the preferred workflow: open `.ipynb` in VS Code, Select Kernel, pick Colab runtime. Never tell the user to open Colab browser UI.
+- **Colab browser UI** is the preferred workflow: open notebooks directly in Colab from GitHub. VS Code kernel connection is unreliable (upload widgets, rendering bugs).
+- Large data files (`.npz`, `.parquet`) go to Google Drive at `My Drive/ai-finance/`. Notebooks copy from Drive — never use `files.upload()` widget.
 - For Phase 1 training (small models): T4 GPU is sufficient. Save A100 for Phase 2 or larger workloads.
 - Checkpoints save to Google Drive for crash recovery.
 
