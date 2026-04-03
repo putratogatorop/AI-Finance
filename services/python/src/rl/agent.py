@@ -105,8 +105,9 @@ class LSTMPPOAgent(nn.Module):
 
         # Actor
         action_mean = self.actor_mean(h).squeeze(0)
-        action_std = torch.exp(
-            self.actor_log_std.clamp(min=-5.0, max=2.0)
+        action_std = torch.nan_to_num(
+            torch.exp(self.actor_log_std.clamp(min=-5.0, max=2.0)),
+            nan=0.01,
         ).clamp(min=0.01)
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
         dist = Normal(action_mean, action_std)
@@ -150,8 +151,9 @@ class LSTMPPOAgent(nn.Module):
 
         action_mean = self.actor_mean(h)
         # Clamp log_std to prevent exploding/vanishing std
-        action_std = torch.exp(
-            self.actor_log_std.clamp(min=-5.0, max=2.0)
+        action_std = torch.nan_to_num(
+            torch.exp(self.actor_log_std.clamp(min=-5.0, max=2.0)),
+            nan=0.01,
         ).clamp(min=0.01)
         # Guard against NaN from Tanh saturation
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
