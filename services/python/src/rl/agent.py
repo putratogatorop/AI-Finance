@@ -38,13 +38,20 @@ class LSTMPPOAgent(nn.Module):
         # Actor head — outputs action means in [-1, 1]
         self.actor_mean = nn.Sequential(
             nn.Linear(hidden_size, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
             nn.Linear(128, self.action_size),
             nn.Tanh(),
         )
 
-        # Learnable log standard deviation
-        self.actor_log_std = nn.Parameter(torch.zeros(self.action_size))
+        # Initialize output layer with small weights to prevent Tanh saturation
+        nn.init.uniform_(self.actor_mean[-2].weight, -0.003, 0.003)
+        nn.init.zeros_(self.actor_mean[-2].bias)
+
+        # Learnable log standard deviation (conservative init)
+        self.actor_log_std = nn.Parameter(
+            torch.full((self.action_size,), -0.5)
+        )
 
         # Critic head — value function
         self.critic = nn.Sequential(
@@ -98,7 +105,10 @@ class LSTMPPOAgent(nn.Module):
 
         # Actor
         action_mean = self.actor_mean(h).squeeze(0)
-        action_std = torch.exp(self.actor_log_std).clamp(min=0.01)
+        action_std = torch.exp(
+            self.actor_log_std.clamp(min=-5.0, max=2.0)
+        ).clamp(min=0.01)
+        action_mean = torch.nan_to_num(action_mean, nan=0.0)
         dist = Normal(action_mean, action_std)
 
         if deterministic:
@@ -139,7 +149,12 @@ class LSTMPPOAgent(nn.Module):
         h = self._forward_lstm(obs_batch)
 
         action_mean = self.actor_mean(h)
-        action_std = torch.exp(self.actor_log_std).clamp(min=0.01)
+        # Clamp log_std to prevent exploding/vanishing std
+        action_std = torch.exp(
+            self.actor_log_std.clamp(min=-5.0, max=2.0)
+        ).clamp(min=0.01)
+        # Guard against NaN from Tanh saturation
+        action_mean = torch.nan_to_num(action_mean, nan=0.0)
         dist = Normal(action_mean, action_std)
 
         log_probs = dist.log_prob(action_batch).sum(dim=-1)  # (batch,)
