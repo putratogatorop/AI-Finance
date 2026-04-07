@@ -38,7 +38,7 @@ def load_checkpoint(
     checkpoint_dir: Path,
     obs_size: int,
     n_alts: int,
-    hidden_size: int = 256,
+    hidden_size: int = 128,
     num_layers: int = 2,
 ) -> tuple[list[LSTMPPOAgent], list[float], dict] | None:
     """Load population checkpoint from disk.

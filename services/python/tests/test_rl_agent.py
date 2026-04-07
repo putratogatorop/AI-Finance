@@ -6,8 +6,8 @@ import torch
 
 from src.rl.agent import LSTMPPOAgent
 
-OBS_SIZE = 324
-N_ALTS = 10
+OBS_SIZE = 574   # 20 alts * 28 feat + 9 indicators + 5 portfolio
+N_ALTS = 20
 ACTION_SIZE = N_ALTS * 3
 
 

@@ -15,9 +15,9 @@ class LSTMPPOAgent(nn.Module):
         self,
         obs_size: int,
         n_alts: int,
-        hidden_size: int = 256,
+        hidden_size: int = 128,
         num_layers: int = 2,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
         device: str | torch.device = "cpu",
     ) -> None:
         super().__init__()
@@ -28,16 +28,9 @@ class LSTMPPOAgent(nn.Module):
         self.num_layers = num_layers
         self.device = torch.device(device)
 
-        # Project high-dim obs down before LSTM
-        self.obs_proj = nn.Sequential(
-            nn.Linear(obs_size, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-        )
-
-        # LSTM backbone
+        # LSTM backbone (obs_size is small enough to feed directly)
         self.lstm = nn.LSTM(
-            input_size=512,
+            input_size=obs_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
@@ -57,7 +50,7 @@ class LSTMPPOAgent(nn.Module):
         nn.init.uniform_(self.actor_mean[-2].weight, -0.003, 0.003)
         nn.init.zeros_(self.actor_mean[-2].bias)
 
-        # Learnable log standard deviation (conservative init)
+        # Learnable log standard deviation
         self.actor_log_std = nn.Parameter(
             torch.full((self.action_size,), -0.5)
         )
@@ -87,20 +80,12 @@ class LSTMPPOAgent(nn.Module):
         Handles 1-D (single obs), 2-D (batch of obs) inputs by adding
         the required sequence dimension.
         """
-        # Project obs down: (*, obs_size) -> (*, 512)
         if obs.dim() == 1:
-            proj = self.obs_proj(obs)
-            proj = proj.unsqueeze(0).unsqueeze(0)  # (1, 1, 512)
+            obs = obs.unsqueeze(0).unsqueeze(0)
         elif obs.dim() == 2:
-            proj = self.obs_proj(obs)
-            proj = proj.unsqueeze(1)  # (batch, 1, 512)
-        else:
-            # (batch, seq, obs_size) -> project each timestep
-            b, s, _ = obs.shape
-            proj = self.obs_proj(obs.reshape(b * s, -1)).reshape(b, s, -1)
+            obs = obs.unsqueeze(1)
 
-        lstm_out, self.hidden = self.lstm(proj, self.hidden)
-        # Return the last time-step output: (batch, hidden_size)
+        lstm_out, self.hidden = self.lstm(obs, self.hidden)
         return lstm_out[:, -1, :]
 
     # ------------------------------------------------------------------
