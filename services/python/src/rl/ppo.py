@@ -97,12 +97,13 @@ def ppo_update(
     Returns dict with average policy_loss, value_loss, entropy.
     """
     optimizer = Adam(agent.parameters(), lr=lr)
+    device = agent.device
 
-    obs = batch["obs"]
-    actions = batch["actions"]
-    old_log_probs = batch["old_log_probs"]
-    returns = batch["returns"]
-    advantages = batch["advantages"]
+    obs = batch["obs"].to(device)
+    actions = batch["actions"].to(device)
+    old_log_probs = batch["old_log_probs"].to(device)
+    returns = batch["returns"].to(device)
+    advantages = batch["advantages"].to(device)
 
     n = obs.shape[0]
     total_policy_loss = 0.0

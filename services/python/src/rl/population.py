@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import time
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from src.rl.checkpoint import load_checkpoint, save_checkpoint
 from src.rl.config import RLConfig
 from src.rl.env import CryptoTradingEnv
 from src.rl.ppo import PPOBuffer, ppo_update
+
+logger = logging.getLogger(__name__)
 
 
 class PopulationTrainer:
@@ -28,6 +31,7 @@ class PopulationTrainer:
         kill_fraction: float = 0.3,
         checkpoint_dir: Path | None = None,
         config: RLConfig | None = None,
+        device: str | torch.device = "cpu",
     ) -> None:
         self.dataset = dataset
         self.population_size = population_size
@@ -37,6 +41,7 @@ class PopulationTrainer:
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
         self.cfg = config or RLConfig()
         self.generation = 0
+        self.device = torch.device(device)
 
         # Compute obs_size from dataset
         alt_features = dataset["alt_features"]
@@ -61,10 +66,17 @@ class PopulationTrainer:
                 self.agents, self.scores, meta = result
                 self.generation = meta.get("generation", 0)
 
+        # Move loaded agents to device
+        for agent in self.agents:
+            agent.device = self.device
+            agent.to(self.device)
+
         # Fill up to population_size
         while len(self.agents) < self.population_size:
             self.agents.append(
-                LSTMPPOAgent(obs_size=self.obs_size, n_alts=self.n_alts)
+                LSTMPPOAgent(
+                    obs_size=self.obs_size, n_alts=self.n_alts, device=self.device,
+                )
             )
             self.scores.append(0.0)
 
@@ -177,9 +189,21 @@ class PopulationTrainer:
     def train(self, n_generations: int) -> list[dict]:
         """Run multiple generations and return stats list."""
         stats_list: list[dict] = []
-        for _ in range(n_generations):
+        gen_times: list[float] = []
+        for i in range(n_generations):
             stats = self.run_generation()
             stats_list.append(stats)
+            gen_times.append(stats["elapsed_s"])
+
+            avg_time = sum(gen_times) / len(gen_times)
+            remaining = (n_generations - i - 1) * avg_time
+            eta_min = remaining / 60
+
+            logger.info(
+                f"Gen {stats['generation']:>4}/{self.generation + n_generations - i - 1:>4} | "
+                f"best={stats['best_reward']:>8.4f} mean={stats['mean_reward']:>8.4f} | "
+                f"{stats['elapsed_s']:.1f}s/gen | ETA {eta_min:.0f}min"
+            )
         return stats_list
 
     def get_best_agent(self) -> LSTMPPOAgent:

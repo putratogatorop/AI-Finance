@@ -18,6 +18,7 @@ class LSTMPPOAgent(nn.Module):
         hidden_size: int = 64,
         num_layers: int = 2,
         dropout: float = 0.3,
+        device: str | torch.device = "cpu",
     ) -> None:
         super().__init__()
         self.obs_size = obs_size
@@ -25,6 +26,7 @@ class LSTMPPOAgent(nn.Module):
         self.action_size = n_alts * 3
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.device = torch.device(device)
 
         # LSTM backbone
         self.lstm = nn.LSTM(
@@ -63,6 +65,9 @@ class LSTMPPOAgent(nn.Module):
         # LSTM hidden state (managed across steps)
         self.hidden: tuple[torch.Tensor, torch.Tensor] | None = None
 
+        # Move entire model to device
+        self.to(self.device)
+
     # ------------------------------------------------------------------
     def reset_hidden(self) -> None:
         """Reset LSTM hidden state to None."""
@@ -100,7 +105,7 @@ class LSTMPPOAgent(nn.Module):
             log_prob: scalar log-probability of the action
             value: scalar value estimate
         """
-        obs_t = torch.as_tensor(obs, dtype=torch.float32)
+        obs_t = torch.as_tensor(obs, dtype=torch.float32).to(self.device)
         h = self._forward_lstm(obs_t)
 
         # Actor
@@ -147,6 +152,8 @@ class LSTMPPOAgent(nn.Module):
         saved_hidden = self.hidden
         self.hidden = None
 
+        obs_batch = obs_batch.to(self.device)
+        action_batch = action_batch.to(self.device)
         h = self._forward_lstm(obs_batch)
 
         action_mean = self.actor_mean(h)
