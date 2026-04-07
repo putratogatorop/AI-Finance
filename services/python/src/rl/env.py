@@ -7,8 +7,6 @@ import numpy as np
 from src.rl.config import RLConfig
 from src.rl.portfolio import Portfolio
 
-SCORE_THRESHOLD = 0.3
-
 
 class CryptoTradingEnv:
     """Gym-style environment for crypto trading with 12-hour decision windows."""
@@ -17,15 +15,29 @@ class CryptoTradingEnv:
         self,
         dataset: dict,
         config: RLConfig | None = None,
+        top_n: int | None = None,
     ) -> None:
         self.cfg = config or RLConfig()
-        self.dataset = dataset
 
-        # Unpack dataset
-        self.alt_features: np.ndarray = dataset["alt_features"]      # (T, n_alts, n_alt_feat)
+        # Filter to top N alts by total trading volume (sum of close prices)
+        alt_features = dataset["alt_features"]
+        prices = dataset["prices"]
+        alt_names = list(dataset["alt_names"])
+
+        if top_n is not None and top_n < len(alt_names):
+            total_volume = prices[:, :, 3].sum(axis=0)  # sum of close per alt
+            top_indices = np.argsort(-total_volume)[:top_n]
+            top_indices = np.sort(top_indices)  # keep original order
+
+            alt_features = alt_features[:, top_indices, :]
+            prices = prices[:, top_indices, :]
+            alt_names = [alt_names[i] for i in top_indices]
+
+        # Unpack (filtered) dataset
+        self.alt_features = alt_features
         self.ind_features: np.ndarray = dataset["indicator_features"]  # (T, n_ind_feat)
-        self.prices: np.ndarray = dataset["prices"]                   # (T, n_alts, 4)
-        self.alt_names: list[str] = dataset["alt_names"]
+        self.prices = prices
+        self.alt_names = alt_names
         self.timestamps = dataset["timestamps"]
 
         # Derive dimensions
@@ -95,7 +107,7 @@ class CryptoTradingEnv:
         for asset, pos in self.portfolio.positions.items():
             idx = self.alt_names.index(asset)
             score = scores[idx]
-            if abs(score) < SCORE_THRESHOLD:
+            if abs(score) < self.cfg.SCORE_THRESHOLD:
                 # Agent wants flat -> close
                 assets_to_close.append(asset)
             else:
@@ -113,7 +125,7 @@ class CryptoTradingEnv:
         ranked = np.argsort(-np.abs(scores))
         for i in ranked:
             score = scores[i]
-            if abs(score) < SCORE_THRESHOLD:
+            if abs(score) < self.cfg.SCORE_THRESHOLD:
                 continue
             asset = self.alt_names[i]
             if asset in self.portfolio.positions:

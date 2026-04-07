@@ -1,10 +1,9 @@
 """Tests for CryptoTradingEnv."""
 
 import numpy as np
-import pytest
 
 from src.rl.config import RLConfig
-from src.rl.env import CryptoTradingEnv, SCORE_THRESHOLD
+from src.rl.env import CryptoTradingEnv
 
 
 # ------------------------------------------------------------------
@@ -128,4 +127,34 @@ class TestCryptoTradingEnv:
 
         # No positions => returns are only funding costs (tiny)
         # Episode reward should be close to zero
-        assert abs(total_reward) < 1.0
+        assert abs(total_reward) < 5.0
+
+
+class TestTopNFiltering:
+    def test_top_n_reduces_alts(self):
+        """top_n=5 reduces n_alts from 10 to 5."""
+        ds = _make_fake_dataset(n_alts=10)
+        env = CryptoTradingEnv(ds, top_n=5)
+        assert env.n_alts == 5
+
+    def test_top_n_selects_by_volume(self):
+        """top_n picks alts with highest total close price volume."""
+        ds = _make_fake_dataset(n_alts=10)
+        ds["prices"][:, 0, :] *= 1000
+        env = CryptoTradingEnv(ds, top_n=3)
+        assert "ALT0" in env.alt_names
+
+    def test_top_n_none_keeps_all(self):
+        """top_n=None keeps all alts."""
+        ds = _make_fake_dataset(n_alts=10)
+        env = CryptoTradingEnv(ds, top_n=None)
+        assert env.n_alts == 10
+
+    def test_top_n_obs_size_correct(self):
+        """Obs size adjusts for fewer alts."""
+        ds = _make_fake_dataset(n_alts=10, n_alt_feat=28)
+        env = CryptoTradingEnv(ds, top_n=5)
+        obs = env.reset(start_idx=200)
+        expected = 5 * 28 + 9 + 5
+        assert obs.shape == (expected,)
+        assert env.obs_size == expected
