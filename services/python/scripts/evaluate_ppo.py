@@ -74,15 +74,15 @@ def run_episode(agent, env, start_idx: int) -> dict:
     win_rate = (nonzero > 0).mean() * 100 if len(nonzero) > 0 else 0.0
 
     return {
-        "start_idx": start_idx,
-        "steps": info["step"],
-        "total_return_pct": total_return_pct,
-        "sharpe": sharpe,
-        "max_drawdown_pct": max_dd * 100,
-        "win_rate_pct": win_rate,
-        "trades_opened": trades_opened,
-        "trades_closed": trades_closed,
-        "final_equity": final_equity,
+        "start_idx": int(start_idx),
+        "steps": int(info["step"]),
+        "total_return_pct": float(total_return_pct),
+        "sharpe": float(sharpe),
+        "max_drawdown_pct": float(max_dd * 100),
+        "win_rate_pct": float(win_rate),
+        "trades_opened": int(trades_opened),
+        "trades_closed": int(trades_closed),
+        "final_equity": float(final_equity),
     }
 
 
@@ -160,15 +160,21 @@ def main():
     logger.info(f"Loaded agent: {sum(p.numel() for p in agent.parameters()):,} params")
 
     # Compute holdout range
-    # Training uses random start between 200 and max_safe
-    # Holdout = last holdout_pct of the data
-    holdout_start = int(n_times * (1 - args.holdout_pct))
-    max_safe = n_times - cfg.EPISODE_WINDOWS * cfg.CANDLES_PER_WINDOW - 1
+    # Use shorter episodes (90 windows = ~45 days) so we can fit multiple
+    # evaluations within the holdout portion of the data
+    eval_windows = min(cfg.EPISODE_WINDOWS, 90)
+    eval_cfg = RLConfig(EPISODE_WINDOWS=eval_windows)
+    env = CryptoTradingEnv(dataset, config=eval_cfg, top_n=args.top_n)
 
-    # Ensure holdout_start is valid
+    candles_per_episode = eval_windows * cfg.CANDLES_PER_WINDOW
+    holdout_start = int(n_times * (1 - args.holdout_pct))
+    max_safe = n_times - candles_per_episode - 1
+
+    # Ensure holdout_start leaves room for at least one episode
     holdout_start = min(holdout_start, max_safe)
     holdout_end = max_safe
 
+    logger.info(f"Eval episode length: {eval_windows} windows ({eval_windows * 12 / 24:.0f} days)")
     logger.info(f"Holdout candle range: {holdout_start} - {holdout_end}")
     logger.info(f"Holdout = candles {holdout_start}-{n_times} "
                 f"({(n_times - holdout_start) * 4 / 24:.0f} days)")
