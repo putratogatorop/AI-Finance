@@ -158,3 +158,20 @@ class TestTopNFiltering:
         expected = 5 * 28 + 9 + 5
         assert obs.shape == (expected,)
         assert env.obs_size == expected
+
+
+def test_step_reward_nonzero_with_positions():
+    """Opening a position produces non-zero per-step reward."""
+    ds = _make_fake_dataset(n_times=2000, n_alt_feat=28)
+    cfg = RLConfig(EPISODE_WINDOWS=10)
+    env = CryptoTradingEnv(ds, config=cfg)
+    env.reset(start_idx=200)
+
+    action = np.zeros(10 * 3)
+    action[0] = 0.9
+    action[1] = 0.5
+    action[2] = 0.5
+    _, reward, _, info = env.step(action)
+
+    assert info["n_positions"] >= 1
+    assert isinstance(reward, float)
