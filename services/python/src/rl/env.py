@@ -209,6 +209,10 @@ class CryptoTradingEnv:
         # --- 9) Reward: dense per-step + episode bonus ---
         # Per-step: scaled PnL change (gives PPO signal every step)
         reward = step_return * 10.0
+        # Penalize inactivity — doing nothing must also cost something,
+        # otherwise agent learns "no trades = no fees = best reward"
+        if self.portfolio.n_positions == 0:
+            reward -= 0.05
         # Penalize large drawdown per step
         if drawdown > self.cfg.REWARD_DD_THRESHOLD:
             reward -= 0.1

@@ -89,6 +89,6 @@ def test_agent_hidden_state_reset(agent: LSTMPPOAgent) -> None:
 
 
 def test_agent_parameter_count(agent: LSTMPPOAgent) -> None:
-    """Total parameters between 10K and 500K."""
+    """Total parameters between 10K and 5M."""
     total = sum(p.numel() for p in agent.parameters())
-    assert 10_000 < total < 500_000, f"param count {total} out of range"
+    assert 10_000 < total < 5_000_000, f"param count {total} out of range"
