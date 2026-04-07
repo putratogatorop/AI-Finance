@@ -1,6 +1,7 @@
 """Integration test: run a full episode with random actions."""
 import numpy as np
 
+from src.rl.agent import LSTMPPOAgent
 from src.rl.config import RLConfig
 from src.rl.env import CryptoTradingEnv
 
@@ -72,3 +73,26 @@ def test_multiple_episodes_different_starts():
                 action[i * 3 + 2] = abs(action[i * 3 + 2])
             obs, _, done, info = env.step(action)
         assert info["portfolio_value"] > 0, f"Bankrupt in episode {episode}"
+
+
+def test_full_episode_top_n():
+    """Full episode with top_n=5 filtering and PPO update."""
+    ds = _make_realistic_dataset(n_times=2000, n_alts=20, n_alt_feat=28)
+    cfg = RLConfig(EPISODE_WINDOWS=10)
+    env = CryptoTradingEnv(ds, config=cfg, top_n=5)
+
+    agent = LSTMPPOAgent(obs_size=env.obs_size, n_alts=env.n_alts)
+
+    obs = env.reset(start_idx=200)
+    agent.reset_hidden()
+    done = False
+    total_reward = 0.0
+
+    while not done:
+        action, log_prob, value = agent.act(obs)
+        obs, reward, done, info = env.step(action)
+        total_reward += reward
+
+    assert done is True
+    assert info["step"] <= cfg.EPISODE_WINDOWS
+    assert isinstance(total_reward, (float, np.floating))
