@@ -198,7 +198,7 @@ def main():
         gen_times.append(elapsed)
 
         if mean_reward > best_reward:
-            best_reward = mean_reward
+            best_reward = float(mean_reward)
             torch.save(agent.cpu().state_dict(), ckpt_dir / "best_agent.pt")
             agent.to(device)
 
