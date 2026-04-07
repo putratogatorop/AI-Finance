@@ -33,7 +33,7 @@ def detect_device() -> torch.device:
     if torch.cuda.is_available():
         dev = torch.device("cuda")
         logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
-        logger.info(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        logger.info(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         return dev
     logger.info("No GPU detected, using CPU")
     return torch.device("cpu")
