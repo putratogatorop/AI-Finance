@@ -81,14 +81,14 @@ class TestOpenShort:
 
 class TestConstraints:
     def test_reject_max_positions(self, portfolio: Portfolio, cfg: RLConfig):
-        # Fill up to MAX_POSITIONS
+        # Fill up to MAX_POSITIONS with tiny positions (2% each) to stay under 80% exposure
         for i in range(cfg.MAX_POSITIONS):
             ok = portfolio.open_position(
-                f"COIN{i}", 1, 0.05, 100_000, 0.05, 0.10
+                f"COIN{i}", 1, 0.02, 100_000, 0.05, 0.10
             )
-            assert ok is True
+            assert ok is True, f"Failed to open position {i}"
         # Next should fail
-        ok = portfolio.open_position("EXTRA", 1, 0.05, 100_000, 0.05, 0.10)
+        ok = portfolio.open_position("EXTRA", 1, 0.02, 100_000, 0.05, 0.10)
         assert ok is False
 
     def test_reject_duplicate_asset(self, portfolio: Portfolio):
