@@ -8,9 +8,10 @@ class RLConfig:
     """Immutable configuration for the RL trading environment."""
 
     # Position constraints
-    MAX_POSITIONS: int = 10
+    MAX_POSITIONS: int = 20
     MAX_SINGLE_POSITION_PCT: float = 0.10
     MAX_EXPOSURE_PCT: float = 0.80
+    SCORE_THRESHOLD: float = 0.15
 
     # SL/TP ranges
     SL_MIN: float = 0.02

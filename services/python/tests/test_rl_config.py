@@ -14,9 +14,12 @@ class TestRLConfigDefaults:
     """Verify all default values are correct."""
 
     def test_position_constraints(self, cfg: RLConfig) -> None:
-        assert cfg.MAX_POSITIONS == 10
+        assert cfg.MAX_POSITIONS == 20
         assert cfg.MAX_SINGLE_POSITION_PCT == 0.10
         assert cfg.MAX_EXPOSURE_PCT == 0.80
+
+    def test_score_threshold_default(self, cfg: RLConfig) -> None:
+        assert cfg.SCORE_THRESHOLD == 0.15
 
     def test_sl_tp_ranges(self, cfg: RLConfig) -> None:
         assert cfg.SL_MIN == 0.02
