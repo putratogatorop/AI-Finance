@@ -47,7 +47,7 @@ class PPOBuffer:
             else:
                 next_value = self.values[t + 1]
             not_done = 1.0 - float(self.dones[t])
-            delta = (
+            delta = float(
                 self.rewards[t]
                 + gamma * next_value * not_done
                 - self.values[t]

@@ -139,6 +139,7 @@ class PopulationTrainer:
                 np.random.randint(len(top_indices))
             ]
             self.agents[dead_idx] = copy.deepcopy(self.agents[parent_idx])
+            self.agents[dead_idx].lstm.flatten_parameters()
 
             # Add mutation noise to all parameters
             with torch.no_grad():

@@ -44,6 +44,7 @@ class CryptoTradingEnv:
         self.start_idx: int = 0
         self.step_idx: int = 0
         self.episode_returns: list[float] = []
+        self.peak_equity: float = 0.0
 
     # ------------------------------------------------------------------
     # Gym interface
@@ -53,6 +54,7 @@ class CryptoTradingEnv:
         self.portfolio = Portfolio(self.cfg)
         self.step_idx = 0
         self.episode_returns = []
+        self.peak_equity = float(self.cfg.STARTING_CAPITAL)
 
         max_safe = (
             self.n_times
@@ -190,11 +192,11 @@ class CryptoTradingEnv:
         next_candle = (
             self.start_idx + self.step_idx * self.cfg.CANDLES_PER_WINDOW
         )
-        peak = max(
-            self.cfg.STARTING_CAPITAL,
-            max(equity_before, equity_after),
+        self.peak_equity = max(self.peak_equity, equity_after)
+        drawdown = (
+            (self.peak_equity - equity_after) / self.peak_equity
+            if self.peak_equity > 0 else 0.0
         )
-        drawdown = (peak - equity_after) / peak if peak > 0 else 0.0
 
         done = False
         if self.step_idx >= self.cfg.EPISODE_WINDOWS:
@@ -204,10 +206,15 @@ class CryptoTradingEnv:
         elif next_candle + self.cfg.CANDLES_PER_WINDOW > self.n_times:
             done = True
 
-        # --- 9) Reward ---
-        reward = 0.0
+        # --- 9) Reward: dense per-step + episode bonus ---
+        # Per-step: scaled PnL change (gives PPO signal every step)
+        reward = step_return * 10.0
+        # Penalize large drawdown per step
+        if drawdown > self.cfg.REWARD_DD_THRESHOLD:
+            reward -= 0.1
+        # Episode-end bonus
         if done:
-            reward = self._episode_reward()
+            reward += self._episode_reward()
 
         # --- 10) Info ---
         info = {
