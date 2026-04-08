@@ -35,7 +35,7 @@ LOOKBACK = 20         # 20-bar rolling window for volume average
 PULLBACK_PCT = 0.02     # Wait for 2% pullback to enter (was 3%)
 ATR_STOP_MULT = 2.0     # Stop at 2x ATR from entry
 ATR_TP_MULT = 5.0       # TP at 5x ATR (2.5:1 R:R)
-MAX_HOLD_BARS = 48      # 12h max hold (48 x 15min bars) — longer to let winners run
+MAX_HOLD_BARS = 96      # 24h max hold (96 x 15min bars) — let winners ride full daily move
 RISK_PER_TRADE = 0.02   # 2% equity risk
 MAX_LEVERAGE = 3.0
 MAX_CONCURRENT = 2
@@ -154,107 +154,105 @@ def detect_breakouts(df: pd.DataFrame, vol_mult: float = VOL_MULT,
 
 def simulate_pullback_trade(
     close: np.ndarray, high: np.ndarray, low: np.ndarray,
+    volume: np.ndarray | None,
     signal_bar: int, direction: int,
     pullback_pct: float, atr_stop_mult: float,
     atr_value: float, max_hold_bars: int,
     atr_tp_mult: float = ATR_TP_MULT,
 ) -> dict | None:
-    """Simulate a pullback entry trade after a breakout signal."""
+    """Simulate a momentum trade designed to catch 8-16% of a 10-20% move.
+
+    Key changes from v1:
+    - ENTER FAST: next bar after signal (don't wait for pullback)
+    - STOP WIDE: 3% fixed minimum (don't get noise-stopped on big moves)
+    - NO FIXED TP: let winners run, exit on momentum death
+    - TRAIL AGGRESSIVELY: once in profit, trail to lock in gains
+    - EXIT ON VOLUME DEATH: if volume drops below average, momentum is over
+    """
     n = len(close)
-    signal_price = close[signal_bar]
-
-    # Wait for pullback (up to 4 bars = 16h)
-    entry_bar = None
-    entry_price = None
-
-    for i in range(signal_bar + 1, min(signal_bar + 5, n)):
-        if direction == 1:
-            # Long: wait for price to pull back, then form higher low
-            pullback = (signal_price - low[i]) / signal_price
-            if pullback >= pullback_pct:
-                # Check next bar for higher low (confirmation)
-                if i + 1 < n and low[i+1] > low[i]:
-                    entry_bar = i + 1
-                    entry_price = close[i + 1]
-                    break
-        else:
-            # Short: wait for price to bounce, then form lower high
-            pullback = (high[i] - signal_price) / signal_price
-            if pullback >= pullback_pct:
-                if i + 1 < n and high[i+1] < high[i]:
-                    entry_bar = i + 1
-                    entry_price = close[i + 1]
-                    break
-
-    # No pullback found — try entering at first bar if move continues
-    if entry_bar is None:
-        if signal_bar + 1 < n:
-            entry_bar = signal_bar + 1
-            entry_price = close[signal_bar + 1]
-        else:
-            return None
-
-    if entry_price is None or entry_price == 0:
+    if signal_bar + 1 >= n:
         return None
 
-    # Set stops
-    stop_dist = atr_value * atr_stop_mult * entry_price
-    tp_dist = atr_value * atr_tp_mult * entry_price
+    # ENTER FAST: next bar open (no pullback waiting)
+    entry_bar = signal_bar + 1
+    entry_price = close[entry_bar]
+    if entry_price == 0:
+        return None
+
+    # STOP: wider of 3% or 2x ATR (don't get stopped on noise)
+    stop_pct = max(0.03, atr_value * atr_stop_mult)
 
     if direction == 1:
-        stop_price = entry_price - stop_dist
-        tp_price = entry_price + tp_dist
+        stop_price = entry_price * (1 - stop_pct)
     else:
-        stop_price = entry_price + stop_dist
-        tp_price = entry_price - tp_dist
+        stop_price = entry_price * (1 + stop_pct)
 
-    # Simulate trade
+    # Track high water mark for trailing
+    hwm = entry_price  # High water mark
+    trail_active = False
+
     exit_bar = None
     exit_price = None
     exit_reason = None
-    partial_taken = False
-    trailing_stop = stop_price
+
+    # Volume average for momentum death detection
+    if volume is not None and signal_bar >= 20:
+        vol_avg = np.mean(volume[signal_bar - 20:signal_bar])
+    else:
+        vol_avg = None
 
     for i in range(entry_bar + 1, min(entry_bar + max_hold_bars + 1, n)):
-        # Check stop
+        # Update high water mark
+        if direction == 1:
+            if close[i] > hwm:
+                hwm = close[i]
+        else:
+            if close[i] < hwm:
+                hwm = close[i]
+
+        # CHECK STOP
         if direction == 1:
             if low[i] <= stop_price:
                 exit_bar = i
                 exit_price = stop_price
                 exit_reason = "stop_loss"
                 break
-            if high[i] >= tp_price:
-                exit_bar = i
-                exit_price = tp_price
-                exit_reason = "take_profit"
-                break
-            # Trailing: move stop to breakeven after 1.5R profit
-            if close[i] > entry_price + stop_dist * 1.5 and not partial_taken:
-                stop_price = entry_price  # Breakeven
-                partial_taken = True
-            # Trail at 2x ATR behind high water mark
-            if partial_taken:
-                new_trail = close[i] - atr_value * 2.0 * entry_price
-                if new_trail > stop_price:
-                    stop_price = new_trail
         else:
             if high[i] >= stop_price:
                 exit_bar = i
                 exit_price = stop_price
                 exit_reason = "stop_loss"
                 break
-            if low[i] <= tp_price:
+
+        # TRAILING STOP: activate after +5% profit, trail loosely (keep 30% of max gain)
+        # This lets winners run: a +12% move can pull back to +8.4% before we exit
+        if direction == 1:
+            unrealized = (close[i] - entry_price) / entry_price
+            if unrealized > 0.05:
+                trail_active = True
+                # Trail: lock in only 30% of max gain (give back 70% — let it breathe)
+                new_stop = entry_price + (hwm - entry_price) * 0.30
+                # But never below breakeven once trail is active
+                new_stop = max(new_stop, entry_price * 1.005)
+                if new_stop > stop_price:
+                    stop_price = new_stop
+        else:
+            unrealized = (entry_price - close[i]) / entry_price
+            if unrealized > 0.05:
+                trail_active = True
+                new_stop = entry_price - (entry_price - hwm) * 0.30
+                new_stop = min(new_stop, entry_price * 0.995)
+                if new_stop < stop_price:
+                    stop_price = new_stop
+
+        # MOMENTUM DEATH: volume drops below average for 2 bars AND we're in profit
+        if vol_avg is not None and volume is not None and i >= 2 and trail_active:
+            vol_dying = volume[i] < vol_avg and volume[i-1] < vol_avg
+            if vol_dying:
                 exit_bar = i
-                exit_price = tp_price
-                exit_reason = "take_profit"
+                exit_price = close[i]
+                exit_reason = "momentum_death"
                 break
-            if close[i] < entry_price - stop_dist * 1.5 and not partial_taken:
-                stop_price = entry_price
-                partial_taken = True
-            if partial_taken:
-                new_trail = close[i] + atr_value * 2.0 * entry_price
-                if new_trail < stop_price:
-                    stop_price = new_trail
 
     # Time exit
     if exit_bar is None:
@@ -277,7 +275,7 @@ def simulate_pullback_trade(
         "pnl_pct": pnl_pct,
         "hold_bars": exit_bar - entry_bar,
         "exit_reason": exit_reason,
-        "signal_volume_ratio": 0,  # Filled by caller
+        "signal_volume_ratio": 0,
     }
 
 
@@ -353,6 +351,7 @@ def main():
 
             trade = simulate_pullback_trade(
                 close=close, high=high, low=low,
+                volume=volume,
                 signal_bar=bar, direction=sig["direction"],
                 pullback_pct=PULLBACK_PCT, atr_stop_mult=ATR_STOP_MULT,
                 atr_value=atr[bar], max_hold_bars=MAX_HOLD_BARS,

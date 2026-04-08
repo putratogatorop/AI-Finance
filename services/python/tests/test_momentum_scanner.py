@@ -69,8 +69,10 @@ def test_simulate_trade():
     high = close + 0.01
     low = close - 0.01
 
+    volume = np.full(n, 5000.0)
     trade = simulate_pullback_trade(
         close=close, high=high, low=low,
+        volume=volume,
         signal_bar=5, direction=1,
         pullback_pct=0.03, atr_stop_mult=2.0,
         atr_value=0.02, max_hold_bars=12,

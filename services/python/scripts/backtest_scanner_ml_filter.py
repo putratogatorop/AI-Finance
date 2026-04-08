@@ -49,7 +49,7 @@ LOOKBACK = 20
 PULLBACK_PCT = 0.02
 ATR_STOP_MULT = 2.0
 ATR_TP_MULT = 5.0
-MAX_HOLD_BARS = 48
+MAX_HOLD_BARS = 96
 MAX_LEVERAGE = 3.0
 MAX_DAILY_MOVE = 0.10
 BTC_TREND_PERIOD = 30
@@ -400,6 +400,7 @@ def main():
                 close=close,
                 high=high,
                 low=low,
+                volume=volume,
                 signal_bar=bar,
                 direction=sig["direction"],
                 pullback_pct=PULLBACK_PCT,
@@ -644,6 +645,24 @@ def main():
                 f"{w['window']:>4} {w['train_n']:>7} {w['test_n']:>6} {w['filtered_n']:>6} "
                 f"{w['filter_rate']:>9.1%} {w['unfiltered_wr']:>6.1%} "
                 f"{w['filtered_wr']:>6.1%} {w['unfiltered_pf']:>6.2f} {w['filtered_pf']:>6.2f}"
+            )
+
+    # Print last 10 trades at 0.70 threshold for manual verification
+    if "ml_proba" in all_oos.columns:
+        filt_70 = all_oos[all_oos["ml_proba"] > 0.70].sort_values("signal_time")
+        logger.info("\n" + "=" * 60)
+        logger.info("LAST 10 TRADES @ 0.70 THRESHOLD (for manual verification)")
+        logger.info("=" * 60)
+        last_10 = filt_70.tail(10)
+        for _, t in last_10.iterrows():
+            direction = "LONG" if t["direction"] == 1 else "SHORT"
+            result = "WIN" if t["pnl_pct"] > 0 else "LOSS"
+            sig_time = str(t['signal_time'])[:19]
+            logger.info(
+                f"  {sig_time} | {t['symbol']:>14s} | {direction:>5s} | "
+                f"pnl={t['pnl_pct']:+6.2%} | {t['exit_reason']:>12s} | "
+                f"ml_prob={t['ml_proba']:.3f} | vol_ratio={t.get('vol_ratio', 0):.1f}x | "
+                f"{result}"
             )
 
     elapsed = time.time() - start_t
