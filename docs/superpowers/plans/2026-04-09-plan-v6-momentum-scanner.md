@@ -1,10 +1,164 @@
+# V6: Momentum Scanner Backtester Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Backfill 15min data for all ~200 Binance coins, then backtest a momentum scanner that detects breakout coins (like ENJ +41%) and proves the strategy can achieve 10-15% monthly returns.
+
+**Architecture:** First extend the existing 15min backfill script to all ~200 symbols. Then load all coin CSVs, simulate scanning at each 15min timestamp for volume+price breakouts, simulate pullback entries with ATR stops, and track all trades.
+
+**Tech Stack:** Python 3.12, pandas, numpy, existing backfill_binance_15m.py, existing backtester_v4.py for metrics
+
+---
+
+## Data Plan
+
+We currently have 15min OHLCV for only 7 coins. The momentum scanner needs ALL ~200. The existing `backfill_binance_15m.py` script works perfectly — just swap the symbol list to use the same ~200 symbols from `backfill_binance_vision.py` (4h script).
+
+**Download estimate:** 200 coins × 36 months = 7,200 zip files at 4 workers. ~30-60 min.
+
+## File Structure
+
+| File | Responsibility |
+|---|---|
+| `scripts/backfill_binance_15m.py` | Already exists — update symbol list to 200+ coins |
+| `scripts/backtest_momentum_scanner.py` | Load all coins, scan for breakouts, simulate trades, report results |
+| `tests/test_momentum_scanner.py` | Unit tests for scanner detection and entry logic |
+
+---
+
+### Task 0: Backfill 15min Data for All 200+ Coins
+
+**Files:**
+- Modify: `services/python/scripts/backfill_binance_15m.py` (update V4_SYMBOLS list)
+
+- [ ] **Step 1: Update symbol list to all ~200 coins**
+
+Copy the full SYMBOLS list from `backfill_binance_vision.py` (the 4h script) into `backfill_binance_15m.py`, replacing the 7-coin V4_SYMBOLS list.
+
+- [ ] **Step 2: Increase workers to 8 for faster download**
+
+Change `WORKERS = 4` to `WORKERS = 8`.
+
+- [ ] **Step 3: Run the backfill**
+
+Run: `cd services/python && python scripts/backfill_binance_15m.py`
+Expected: ~7,200 zip files, 30-60 minutes. Downloads are idempotent (skips existing files — our 7 v4 coins won't re-download).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add services/python/scripts/backfill_binance_15m.py
+git commit -m "feat: extend 15min backfill to all 200+ Binance coins"
+```
+
+---
+
+### Task 1: Momentum Scanner Backtester
+
+**Files:**
+- Create: `services/python/scripts/backtest_momentum_scanner.py`
+- Create: `services/python/tests/test_momentum_scanner.py`
+
+- [ ] **Step 1: Write failing tests**
+
+```python
+# tests/test_momentum_scanner.py
+import sys
+sys.path.insert(0, ".")
+
+import numpy as np
+import pandas as pd
+import pytest
+
+
+def make_coin_data(n: int = 200, seed: int = 42) -> pd.DataFrame:
+    """Generate synthetic 4h OHLCV with a breakout at bar 100."""
+    rng = np.random.RandomState(seed)
+    close = 1.0 * np.exp(np.cumsum(rng.normal(0, 0.005, n)))
+    # Inject breakout at bar 100: price jumps 8%, volume spikes 5x
+    close[100:] *= 1.08
+    volume = rng.uniform(1000, 5000, n)
+    volume[100] = 25000  # 5x spike
+    volume[101] = 20000  # Confirms
+    high = close * (1 + rng.uniform(0, 0.02, n))
+    low = close * (1 - rng.uniform(0, 0.02, n))
+
+    return pd.DataFrame({
+        "open_time": pd.date_range("2024-01-01", periods=n, freq="4h"),
+        "open": close * (1 + rng.normal(0, 0.005, n)),
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": volume,
+    })
+
+
+def test_detect_breakouts():
+    from scripts.backtest_momentum_scanner import detect_breakouts
+
+    df = make_coin_data(200)
+    signals = detect_breakouts(
+        df, vol_mult=3.0, price_thresh=0.05, lookback=20
+    )
+
+    # Should detect the breakout at bar 100-101
+    assert len(signals) > 0
+    assert any(99 <= s["bar"] <= 102 for s in signals)
+    assert signals[0]["direction"] == 1  # Long (price went up)
+
+
+def test_no_breakout_in_quiet_data():
+    from scripts.backtest_momentum_scanner import detect_breakouts
+
+    rng = np.random.RandomState(99)
+    n = 200
+    close = 1.0 + np.cumsum(rng.normal(0, 0.001, n))
+    df = pd.DataFrame({
+        "open_time": pd.date_range("2024-01-01", periods=n, freq="4h"),
+        "open": close, "high": close + 0.01, "low": close - 0.01,
+        "close": close,
+        "volume": rng.uniform(1000, 2000, n),  # No spikes
+    })
+
+    signals = detect_breakouts(df, vol_mult=3.0, price_thresh=0.05, lookback=20)
+    assert len(signals) == 0
+
+
+def test_simulate_trade():
+    from scripts.backtest_momentum_scanner import simulate_pullback_trade
+
+    # Price goes up 8%, pulls back 3%, then continues up 15%
+    n = 20
+    close = np.array([1.0]*5 + [1.08]*3 + [1.05]*2 + [1.15]*5 + [1.20]*5)
+    high = close + 0.01
+    low = close - 0.01
+
+    trade = simulate_pullback_trade(
+        close=close, high=high, low=low,
+        signal_bar=5, direction=1,
+        pullback_pct=0.03, atr_stop_mult=2.0,
+        atr_value=0.02, max_hold_bars=12,
+    )
+
+    assert trade is not None
+    assert trade["direction"] == 1
+    assert trade["pnl_pct"] > 0  # Should be profitable
+```
+
+- [ ] **Step 2: Run tests, verify fail**
+
+Run: `cd services/python && python -m pytest tests/test_momentum_scanner.py -v`
+
+- [ ] **Step 3: Implement backtest_momentum_scanner.py**
+
+```python
 # scripts/backtest_momentum_scanner.py
 """V6 Momentum Scanner Backtester.
 
 Scans 200+ coins on 4h bars for volume+price breakouts.
 Simulates pullback entries, ATR stops, and trailing profits.
 
-Uses existing 4h CSV data from data/raw/15m/.
+Uses existing 4h CSV data from data/raw/4h/.
 """
 
 import csv
@@ -67,10 +221,11 @@ def load_coin(symbol_dir: Path) -> pd.DataFrame | None:
     combined["open_time"] = pd.to_numeric(combined["open_time"], errors="coerce")
     combined = combined.dropna(subset=["open_time", "close"])
 
-    # Handle mixed timestamps: some files use ms (13 digits), others us (16 digits)
-    ts = combined["open_time"].values.astype(float)
-    ts = np.where(ts > 1e13, ts / 1e3, ts)  # Convert microseconds to milliseconds
-    combined["open_time"] = pd.to_datetime(ts, unit="ms", utc=True)
+    # Handle microsecond timestamps (Binance Vision 2025+)
+    if combined["open_time"].iloc[0] > 1e13:
+        combined["open_time"] = pd.to_datetime(combined["open_time"] / 1e6, unit="s", utc=True)
+    else:
+        combined["open_time"] = pd.to_datetime(combined["open_time"], unit="ms", utc=True)
 
     combined = combined.sort_values("open_time").reset_index(drop=True)
 
@@ -131,8 +286,8 @@ def detect_breakouts(df: pd.DataFrame, vol_mult: float = VOL_MULT,
 
         # Confirm: previous bar also had elevated volume (2x)
         if volume[i-1] < 1.5 * vol_ma[i-1]:
-            # Allow single-bar spikes if very strong (>5x vol and price > thresh)
-            if volume[i] < 5.0 * vol_ma[i] or abs(ret) < price_thresh:
+            # Allow single-bar spikes if very strong (>5x vol and >8% move)
+            if volume[i] < 5.0 * vol_ma[i] or abs(ret) < 0.08:
                 continue
 
         # Check not already up >15% in last 6 bars (24h)
@@ -443,3 +598,26 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+- [ ] **Step 4: Run tests, verify pass**
+
+Run: `cd services/python && python -m pytest tests/test_momentum_scanner.py -v`
+Expected: 3 tests pass
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add services/python/scripts/backtest_momentum_scanner.py services/python/tests/test_momentum_scanner.py
+git commit -m "feat: add v6 momentum scanner backtester — scans 200+ coins for breakouts"
+```
+
+- [ ] **Step 6: Run the backtest**
+
+Run: `cd services/python && python scripts/backtest_momentum_scanner.py`
+Expected: Scans 200+ coins × 4 years of 4h data. Should find hundreds of breakout signals. Key metrics to validate:
+- Win rate > 45%
+- R:R > 2:1
+- Profit factor > 1.5
+- Monthly return > 10% at 3x leverage
+- Trades/month > 5
