@@ -129,17 +129,16 @@ def detect_breakouts(df: pd.DataFrame, vol_mult: float = VOL_MULT,
         if abs(ret) < price_thresh:
             continue
 
-        # Confirm: previous bar also had elevated volume (2x)
-        if volume[i-1] < 1.5 * vol_ma[i-1]:
-            # Allow single-bar spikes if very strong (>5x vol and price > thresh)
-            if volume[i] < 5.0 * vol_ma[i] or abs(ret) < price_thresh:
-                continue
-
-        # Check not already up >15% in last 6 bars (24h)
-        if i >= 6:
-            day_ret = (close[i] - close[i-6]) / close[i-6]
+        # Check not already up >10% in last 6 bars (1.5h on 15min)
+        # Use 24h window (96 bars) for the "too late" filter
+        if i >= 96:
+            day_ret = (close[i] - close[i-96]) / close[i-96]
             if abs(day_ret) > MAX_DAILY_MOVE:
                 continue
+
+        # Cooldown: skip if we already signaled this coin in last 8 bars (2h)
+        if signals and signals[-1]["bar"] > i - 8:
+            continue
 
         direction = 1 if ret > 0 else -1
         signals.append({
@@ -323,7 +322,7 @@ def main():
         # Check minimum volume (rough filter)
         avg_vol = np.nanmean(volume[-100:]) if len(volume) >= 100 else np.nanmean(volume)
         avg_price = np.nanmean(close[-100:]) if len(close) >= 100 else np.nanmean(close)
-        if avg_vol * avg_price < MIN_VOLUME_USD / 6:  # 4h bar, so divide daily by 6
+        if avg_vol * avg_price < MIN_VOLUME_USD / 96:  # 15min bar, 96 bars per day
             continue
 
         # Detect breakouts
