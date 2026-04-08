@@ -92,3 +92,32 @@ class AuditLog(Base):
     asset: Mapped[str] = mapped_column(String(20), nullable=True)
     details: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetPrice15m(Base):
+    __tablename__ = "asset_prices_15m"
+    __table_args__ = (UniqueConstraint("asset", "timestamp", name="uq_15m_asset_ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    open: Mapped[float] = mapped_column(Float, nullable=False)
+    high: Mapped[float] = mapped_column(Float, nullable=False)
+    low: Mapped[float] = mapped_column(Float, nullable=False)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    volume: Mapped[float] = mapped_column(Float, nullable=False)
+    quote_volume: Mapped[float] = mapped_column(Float, nullable=True)
+    trades: Mapped[int] = mapped_column(Integer, nullable=True)
+    taker_buy_base: Mapped[float] = mapped_column(Float, nullable=True)
+    taker_buy_quote: Mapped[float] = mapped_column(Float, nullable=True)
+
+
+class FundingRate(Base):
+    __tablename__ = "funding_rates"
+    __table_args__ = (UniqueConstraint("asset", "timestamp", "source", name="uq_funding_asset_ts_src"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    funding_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
