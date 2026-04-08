@@ -169,3 +169,40 @@ def test_funding_zscore_range():
     valid = result["funding_zscore"].dropna()
     # Z-score should be roughly centered around 0
     assert abs(valid.mean()) < 2.0
+
+
+def test_cross_asset_features():
+    from src.ml.features_v3 import compute_cross_asset_features
+
+    n = 1000
+    rng = np.random.RandomState(42)
+
+    # BTC close
+    btc_close = pd.Series(50000 * np.exp(np.cumsum(rng.normal(0, 0.001, n))))
+    # Alt close (correlated with BTC)
+    alt_close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.002, n))))
+    # All alt returns for dispersion (5 coins)
+    all_alt_ret_96 = pd.DataFrame({
+        f"alt_{i}": pd.Series(np.exp(np.cumsum(rng.normal(0, 0.002, n)))).pct_change(96)
+        for i in range(5)
+    })
+
+    result = compute_cross_asset_features(alt_close, btc_close, all_alt_ret_96)
+
+    assert "btc_ret_96" in result.columns
+    assert "btc_residual" in result.columns
+    assert "altcoin_dispersion" in result.columns
+    assert len(result) == n
+
+
+def test_interaction_feature():
+    from src.ml.features_v3 import add_interaction_features
+
+    df = pd.DataFrame({
+        "funding_zscore": [0.5, -1.0, 2.0, 0.0],
+        "rsi_norm": [0.3, -0.5, 0.8, 0.0],
+    })
+    result = add_interaction_features(df)
+    assert "funding_x_rsi" in result.columns
+    assert result["funding_x_rsi"].iloc[0] == pytest.approx(0.15)
+    assert result["funding_x_rsi"].iloc[2] == pytest.approx(1.6)

@@ -172,3 +172,52 @@ def merge_funding_features(
         merged = merged.rename(columns={"timestamp_x": "timestamp"})
 
     return merged
+
+
+def compute_cross_asset_features(
+    alt_close: pd.Series,
+    btc_close: pd.Series,
+    all_alt_ret_96: pd.DataFrame,
+    window: int = 672,
+) -> pd.DataFrame:
+    """Compute 3 cross-asset features.
+
+    Parameters
+    ----------
+    alt_close : pd.Series — this coin's close prices
+    btc_close : pd.Series — BTC close prices (same length, aligned)
+    all_alt_ret_96 : pd.DataFrame — 1-day returns for all 5 alt coins (columns)
+    window : int — rolling window for beta calculation (672 = 7 days of 15m)
+
+    Returns
+    -------
+    DataFrame with: btc_ret_96, btc_residual, altcoin_dispersion
+    """
+    n = len(alt_close)
+    result = pd.DataFrame(index=range(n))
+
+    btc_ret_96 = np.log(btc_close / btc_close.shift(96))
+    alt_ret_96 = np.log(alt_close / alt_close.shift(96))
+
+    result["btc_ret_96"] = btc_ret_96.values
+
+    # Rolling beta: cov(alt, btc) / var(btc)
+    alt_ret = alt_close.pct_change()
+    btc_ret = btc_close.pct_change()
+    rolling_cov = alt_ret.rolling(window).cov(btc_ret)
+    rolling_var = btc_ret.rolling(window).var()
+    beta = rolling_cov / rolling_var.replace(0, np.nan)
+
+    result["btc_residual"] = (alt_ret_96 - beta * btc_ret_96).values
+
+    # Altcoin dispersion: std of 1-day returns across all alt coins
+    result["altcoin_dispersion"] = all_alt_ret_96.std(axis=1).values
+
+    return result
+
+
+def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add interaction feature: funding_zscore * rsi_norm."""
+    out = df.copy()
+    out["funding_x_rsi"] = out["funding_zscore"] * out["rsi_norm"]
+    return out
