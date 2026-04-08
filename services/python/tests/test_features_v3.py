@@ -206,3 +206,43 @@ def test_interaction_feature():
     assert "funding_x_rsi" in result.columns
     assert result["funding_x_rsi"].iloc[0] == pytest.approx(0.15)
     assert result["funding_x_rsi"].iloc[2] == pytest.approx(1.6)
+
+
+def test_build_target():
+    from src.ml.features_v3 import build_target
+
+    n = 500
+    rng = np.random.RandomState(42)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.003, n))))
+    vol = pd.Series(rng.normal(0, 0.003, n)).rolling(96).std()
+
+    target = build_target(close, vol, horizon=16)
+
+    # Should have 3 classes: 0 (SHORT), 1 (FLAT), 2 (LONG)
+    valid = target.dropna()
+    assert set(valid.unique()).issubset({0, 1, 2})
+
+    # Last `horizon` rows should be NaN
+    assert target.iloc[-1] != target.iloc[-1]  # NaN check
+
+    # FLAT should be the majority (~60%)
+    flat_pct = (valid == 1).sum() / len(valid)
+    assert 0.45 < flat_pct < 0.75
+
+
+def test_build_target_distribution():
+    from src.ml.features_v3 import build_target
+
+    n = 5000
+    rng = np.random.RandomState(123)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.003, n))))
+    vol = pd.Series(rng.normal(0, 0.003, n)).rolling(96).std()
+
+    target = build_target(close, vol, horizon=16)
+    valid = target.dropna()
+
+    # SHORT and LONG should each be ~20%
+    short_pct = (valid == 0).sum() / len(valid)
+    long_pct = (valid == 2).sum() / len(valid)
+    assert 0.10 < short_pct < 0.30
+    assert 0.10 < long_pct < 0.30

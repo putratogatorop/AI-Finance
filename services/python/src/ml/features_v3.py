@@ -221,3 +221,46 @@ def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["funding_x_rsi"] = out["funding_zscore"] * out["rsi_norm"]
     return out
+
+
+def build_target(
+    close: pd.Series,
+    realized_vol: pd.Series,
+    horizon: int = 16,
+) -> pd.Series:
+    """Build 3-class target: SHORT (0), FLAT (1), LONG (2).
+
+    target = classify(forward_return_16bars / realized_vol_96bars)
+      SHORT: bottom 20% of risk-adjusted returns
+      FLAT:  middle 60%
+      LONG:  top 20%
+
+    Parameters
+    ----------
+    close : pd.Series — close prices
+    realized_vol : pd.Series — rolling volatility (e.g. vol_1d)
+    horizon : int — forward look period in bars (16 bars = 4 hours at 15min)
+
+    Returns
+    -------
+    pd.Series of 0, 1, 2 (NaN for last `horizon` rows)
+    """
+    forward_ret = close.shift(-horizon) / close - 1
+    vol_safe = realized_vol.replace(0, np.nan)
+    risk_adj = forward_ret / vol_safe
+
+    # Use expanding quantiles to avoid look-ahead bias
+    target = pd.Series(np.nan, index=close.index)
+
+    # Compute quantiles on available data up to each point
+    q20 = risk_adj.expanding(min_periods=100).quantile(0.20)
+    q80 = risk_adj.expanding(min_periods=100).quantile(0.80)
+
+    target[risk_adj <= q20] = 0  # SHORT
+    target[risk_adj >= q80] = 2  # LONG
+    target[(risk_adj > q20) & (risk_adj < q80)] = 1  # FLAT
+
+    # NaN out the last `horizon` rows (no future data)
+    target.iloc[-horizon:] = np.nan
+
+    return target
