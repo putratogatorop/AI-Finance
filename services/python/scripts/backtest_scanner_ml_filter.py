@@ -54,8 +54,12 @@ MAX_LEVERAGE = 3.0
 MAX_DAILY_MOVE = 0.10
 BTC_TREND_PERIOD = 30
 
-# ML filter threshold
-ML_PROB_THRESHOLD = 0.55
+# ML filter thresholds to sweep
+ML_THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70]
+
+# Macro regime gate: BTC 7-day EMA must be rising (not falling)
+BTC_MACRO_EMA = 672   # 672 bars on 15min = 7 days
+BTC_MACRO_SLOPE_BARS = 288  # Compare EMA now vs 3 days ago
 
 # Walk-forward config (time-based)
 TRAIN_MONTHS = 18
@@ -316,7 +320,7 @@ def main():
     logger.info(f"Data: {RAW_DIR}")
     logger.info(
         f"Scanner: vol_mult={VOL_MULT} price_thresh={PRICE_THRESH} | "
-        f"ML threshold={ML_PROB_THRESHOLD}"
+        f"ML thresholds={ML_THRESHOLDS}"
     )
 
     # --- Load BTC ---
@@ -328,6 +332,7 @@ def main():
     btc_close = btc_df["close"].values.astype(float)
     btc_volume = btc_df["volume"].values.astype(float)
     btc_ema = pd.Series(btc_close).ewm(span=BTC_TREND_PERIOD).mean().values
+    btc_macro_ema = pd.Series(btc_close).ewm(span=BTC_MACRO_EMA).mean().values
     btc_times = btc_df["open_time"].values
     logger.info(f"BTC loaded: {len(btc_df)} bars")
 
@@ -384,6 +389,11 @@ def main():
                 continue
             if sig["direction"] == -1 and btc_close[btc_idx] > btc_ema[btc_idx]:
                 continue
+
+            # Macro regime gate: DISABLED — hurts performance by over-filtering
+            # The ML model already uses btc_ret_24bar as top feature,
+            # which captures BTC trend context better than a hard gate.
+            pass
 
             # Simulate trade to get label
             trade = simulate_pullback_trade(
@@ -505,20 +515,25 @@ def main():
         test_data = test_data.copy()
         test_data["ml_proba"] = proba
 
-        # Filter
-        filtered = test_data[proba > ML_PROB_THRESHOLD]
+        # Filter at multiple thresholds
         unfiltered = test_data
 
+        m_all = compute_metrics(unfiltered, "Unfiltered")
+        print_metrics(m_all)
+
+        for thresh in ML_THRESHOLDS:
+            filt = test_data[proba > thresh]
+            if len(filt) > 0:
+                m = compute_metrics(filt, f"ML>{thresh:.2f}")
+                logger.info(f"    @{thresh:.2f}: {len(filt)} trades, "
+                            f"WR={m['win_rate']:.1%} PF={m['profit_factor']:.2f}")
+
+        # Use 0.60 as default for aggregation
+        filtered = test_data[proba > 0.60]
         logger.info(
             f"  OOS signals: {len(test_data)} total, "
-            f"{len(filtered)} pass ML filter ({len(filtered)/len(test_data):.1%})"
+            f"{len(filtered)} pass ML>0.60 ({len(filtered)/len(test_data):.1%})"
         )
-
-        # Per-window metrics
-        m_all = compute_metrics(unfiltered, "Unfiltered")
-        m_filtered = compute_metrics(filtered, f"ML>{ML_PROB_THRESHOLD}")
-        print_metrics(m_all)
-        print_metrics(m_filtered)
 
         all_unfiltered_oos_trades.append(unfiltered)
         all_filtered_trades.append(filtered)
@@ -531,6 +546,7 @@ def main():
             + ", ".join(f"{k}={v:.0f}" for k, v in top_features)
         )
 
+        m_filt = compute_metrics(filtered, "ML>0.60")
         window_results.append({
             "window": i + 1,
             "train_n": len(train_data),
@@ -538,9 +554,9 @@ def main():
             "filtered_n": len(filtered),
             "filter_rate": len(filtered) / len(test_data) if len(test_data) > 0 else 0,
             "unfiltered_wr": m_all.get("win_rate", 0),
-            "filtered_wr": m_filtered.get("win_rate", 0),
+            "filtered_wr": m_filt.get("win_rate", 0),
             "unfiltered_pf": m_all.get("profit_factor", 0),
-            "filtered_pf": m_filtered.get("profit_factor", 0),
+            "filtered_pf": m_filt.get("profit_factor", 0),
         })
 
     # --- Aggregate OOS results ---
@@ -554,7 +570,22 @@ def main():
     # Baseline: all signals (including in-sample)
     m_baseline = compute_metrics(signals_df, "ALL signals (in+OOS)")
     m_oos = compute_metrics(all_oos, "OOS unfiltered")
-    m_filtered_total = compute_metrics(all_filtered, f"OOS ML>{ML_PROB_THRESHOLD}")
+    m_filtered_total = compute_metrics(all_filtered, "OOS ML>0.60")
+
+    # Sweep all thresholds on aggregate OOS
+    logger.info("\nThreshold sweep on aggregate OOS:")
+    if "ml_proba" in all_oos.columns:
+        for thresh in ML_THRESHOLDS:
+            filt = all_oos[all_oos["ml_proba"] > thresh]
+            if len(filt) > 0:
+                m = compute_metrics(filt, f"ML>{thresh:.2f}")
+                months = (pd.to_datetime(filt["signal_time"]).max() - pd.to_datetime(filt["signal_time"]).min()).days / 30
+                tpm = len(filt) / months if months > 0 else 0
+                monthly_ret = m.get("expectancy", 0) * tpm * MAX_LEVERAGE
+                logger.info(f"  @{thresh:.2f}: {len(filt)} trades, "
+                            f"WR={m['win_rate']:.1%} PF={m['profit_factor']:.2f} "
+                            f"exp={m.get('expectancy', 0):.2%} "
+                            f"~{monthly_ret:.1%}/month (3x lev)")
 
     logger.info("\nBaseline (all signals including in-sample):")
     print_metrics(m_baseline)
