@@ -123,3 +123,52 @@ def compute_ohlcv_features(df: pd.DataFrame) -> pd.DataFrame:
     out["hour_cos"] = np.cos(2 * np.pi * ts.dt.hour / 24)
 
     return out
+
+
+def merge_funding_features(
+    ohlcv_df: pd.DataFrame,
+    funding_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Merge 8-hourly funding rates into 15m OHLCV and compute 4 features.
+
+    Funding rates are forward-filled across 15m intervals, then:
+    - funding_rate: raw rate
+    - funding_ma_3d: rolling mean over 9 funding periods (9 x 8h = 3 days)
+    - funding_zscore: (rate - mean_96) / std_96 where 96 periods = 32 days
+    - cum_funding_3d: rolling sum over 9 periods
+
+    The rolling windows operate on the 8h funding frequency before upsampling.
+    """
+    out = ohlcv_df.copy()
+    ohlcv_ts = pd.to_datetime(out["timestamp"])
+
+    # Prepare funding series indexed by timestamp
+    fund = funding_df.copy()
+    fund["timestamp"] = pd.to_datetime(fund["timestamp"])
+    fund = fund.sort_values("timestamp").drop_duplicates("timestamp")
+    fund = fund.set_index("timestamp")
+
+    # Compute rolling features at 8h frequency BEFORE upsampling
+    rate = fund["funding_rate"]
+    fund["funding_ma_3d"] = rate.rolling(9, min_periods=1).mean()
+    roll_mean = rate.rolling(96, min_periods=10).mean()
+    roll_std = rate.rolling(96, min_periods=10).std()
+    fund["funding_zscore"] = (rate - roll_mean) / roll_std.replace(0, np.nan)
+    fund["cum_funding_3d"] = rate.rolling(9, min_periods=1).sum()
+
+    # Reindex to 15m timestamps via merge_asof (forward-fill)
+    out["_ts"] = ohlcv_ts
+    out = out.sort_values("_ts")
+    fund_reset = fund.reset_index()
+
+    merged = pd.merge_asof(
+        out, fund_reset[["timestamp", "funding_rate", "funding_ma_3d",
+                         "funding_zscore", "cum_funding_3d"]],
+        left_on="_ts", right_on="timestamp",
+        direction="backward",
+    )
+    merged = merged.drop(columns=["_ts", "timestamp_y"], errors="ignore")
+    if "timestamp_x" in merged.columns:
+        merged = merged.rename(columns={"timestamp_x": "timestamp"})
+
+    return merged

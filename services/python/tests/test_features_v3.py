@@ -135,3 +135,37 @@ def test_feature_count():
     assert len(OHLCV_FEATURE_COLS) == 21
     for col in OHLCV_FEATURE_COLS:
         assert col in result.columns, f"Missing {col}"
+
+
+def make_funding(n: int = 100) -> pd.DataFrame:
+    """Generate synthetic 8-hourly funding rate data."""
+    rng = np.random.RandomState(42)
+    ts = pd.date_range("2024-01-01", periods=n, freq="8h")
+    rates = rng.normal(0.0001, 0.0005, n)
+    return pd.DataFrame({"timestamp": ts, "funding_rate": rates})
+
+
+def test_merge_funding_features():
+    from src.ml.features_v3 import merge_funding_features
+
+    ohlcv = make_ohlcv(1000)
+    funding = make_funding(200)
+    result = merge_funding_features(ohlcv, funding)
+
+    for col in ["funding_rate", "funding_ma_3d", "funding_zscore", "cum_funding_3d"]:
+        assert col in result.columns, f"Missing {col}"
+
+    # funding_rate should be forward-filled (not all NaN)
+    assert result["funding_rate"].notna().sum() > 500
+
+
+def test_funding_zscore_range():
+    from src.ml.features_v3 import merge_funding_features
+
+    ohlcv = make_ohlcv(1000)
+    funding = make_funding(200)
+    result = merge_funding_features(ohlcv, funding)
+
+    valid = result["funding_zscore"].dropna()
+    # Z-score should be roughly centered around 0
+    assert abs(valid.mean()) < 2.0
