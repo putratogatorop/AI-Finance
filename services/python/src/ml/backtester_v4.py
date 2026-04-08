@@ -14,6 +14,24 @@ import numpy as np
 import pandas as pd
 
 
+def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                  period: int = 56) -> np.ndarray:
+    """Compute ATR over `period` bars. ATR(56) on 15min = ~14h of volatility."""
+    n = len(close)
+    tr = np.empty(n)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        tr[i] = max(high[i] - low[i],
+                     abs(high[i] - close[i - 1]),
+                     abs(low[i] - close[i - 1]))
+    atr = np.full(n, np.nan)
+    if n >= period:
+        atr[period - 1] = np.mean(tr[:period])
+        for i in range(period, n):
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+    return atr
+
+
 def backtest_coin(
     df: pd.DataFrame,
     conviction_threshold: float = 0.20,
@@ -21,16 +39,29 @@ def backtest_coin(
     leverage: float = 3.0,
     fee_rate: float = 0.0003,
     funding_rate_8h: float = 0.0001,
-    stop_loss_pct: float = 0.025,
-    take_profit_pct: float = 0.05,
-    max_hold_bars: int = 96,
-    risk_per_trade: float = 0.02,
+    stop_loss_pct: float = 0.0,        # 0 = use ATR-based stop
+    take_profit_pct: float = 0.0,      # 0 = use ATR-based TP
+    atr_stop_mult: float = 2.5,        # stop = entry +/- atr_stop_mult * ATR
+    atr_tp_mult: float = 5.0,          # TP = entry +/- atr_tp_mult * ATR
+    max_hold_bars: int = 192,           # 48h at 15min
+    risk_per_trade: float = 0.01,       # 1% of equity per trade
 ) -> dict:
+    """Run backtest on a single coin's OOS predictions.
+
+    Changes from v1:
+    - ATR-based stops/TP (default) instead of fixed percentage
+    - Fixed position sizing: risk / (stop_distance * leverage) — not * leverage
+    - Lower risk per trade (1% default)
+    - Longer max hold (48h)
+    """
     close = df["close"].values.astype(float)
     high = df["high"].values.astype(float)
     low = df["low"].values.astype(float)
     conviction = df["conviction"].values.astype(float)
     n = len(df)
+
+    # Precompute ATR for dynamic stops
+    atr = _compute_atr(high, low, close, period=56)
 
     equity = initial_capital
     trades = []
@@ -41,50 +72,50 @@ def backtest_coin(
     entry_bar = 0
     direction = 0
     position_size = 0.0
+    stop_price = 0.0
+    tp_price = 0.0
 
     for i in range(1, n):
         if in_position:
             bars_held = i - entry_bar
 
+            # Check stops
             if direction == 1:
-                stop_price = entry_price * (1 - stop_loss_pct)
-                tp_price = entry_price * (1 + take_profit_pct)
                 hit_stop = low[i] <= stop_price
                 hit_tp = high[i] >= tp_price
             else:
-                stop_price = entry_price * (1 + stop_loss_pct)
-                tp_price = entry_price * (1 - take_profit_pct)
                 hit_stop = high[i] >= stop_price
                 hit_tp = low[i] <= tp_price
 
             time_exit = bars_held >= max_hold_bars
 
-            exit_price = None
+            exit_price_val = None
             exit_reason = None
 
             if hit_stop:
-                exit_price = stop_price
+                exit_price_val = stop_price
                 exit_reason = "stop_loss"
             elif hit_tp:
-                exit_price = tp_price
+                exit_price_val = tp_price
                 exit_reason = "take_profit"
             elif time_exit:
-                exit_price = close[i]
+                exit_price_val = close[i]
                 exit_reason = "time_exit"
 
+            # Signal flip exit
             if exit_reason is None:
                 if direction == 1 and conviction[i] < -conviction_threshold:
-                    exit_price = close[i]
+                    exit_price_val = close[i]
                     exit_reason = "signal_flip"
                 elif direction == -1 and conviction[i] > conviction_threshold:
-                    exit_price = close[i]
+                    exit_price_val = close[i]
                     exit_reason = "signal_flip"
 
-            if exit_price is not None:
+            if exit_price_val is not None:
                 if direction == 1:
-                    raw_return = (exit_price - entry_price) / entry_price
+                    raw_return = (exit_price_val - entry_price) / entry_price
                 else:
-                    raw_return = (entry_price - exit_price) / entry_price
+                    raw_return = (entry_price - exit_price_val) / entry_price
 
                 fee_cost = fee_rate * position_size
                 funding_periods = bars_held / 32
@@ -92,12 +123,12 @@ def backtest_coin(
 
                 gross_pnl = raw_return * position_size
                 net_pnl = gross_pnl - fee_cost - funding_cost
-                equity += net_pnl
+                equity = max(equity + net_pnl, 1.0)  # Floor at $1 to prevent negative
 
                 trades.append({
                     "entry_bar": entry_bar, "exit_bar": i,
                     "direction": direction, "entry_price": entry_price,
-                    "exit_price": exit_price, "hold_bars": bars_held,
+                    "exit_price": exit_price_val, "hold_bars": bars_held,
                     "raw_return": raw_return,
                     "pnl_pct": net_pnl / position_size if position_size > 0 else 0,
                     "pnl_usd": net_pnl, "fee_paid": fee_cost,
@@ -106,32 +137,55 @@ def backtest_coin(
                 })
                 in_position = False
 
-        if not in_position:
+        # Entry logic
+        if not in_position and not np.isnan(atr[i]):
             if abs(conviction[i]) >= conviction_threshold:
                 direction = 1 if conviction[i] > 0 else -1
                 entry_price = close[i]
                 entry_bar = i
-                position_size = equity * risk_per_trade * leverage / stop_loss_pct
+
+                # ATR-based or fixed stops
+                if stop_loss_pct > 0:
+                    stop_dist = entry_price * stop_loss_pct
+                else:
+                    stop_dist = atr[i] * atr_stop_mult
+
+                if take_profit_pct > 0:
+                    tp_dist = entry_price * take_profit_pct
+                else:
+                    tp_dist = atr[i] * atr_tp_mult
+
+                if direction == 1:
+                    stop_price = entry_price - stop_dist
+                    tp_price = entry_price + tp_dist
+                else:
+                    stop_price = entry_price + stop_dist
+                    tp_price = entry_price - tp_dist
+
+                # FIXED: position_size = risk / (stop_distance * leverage)
+                stop_pct = stop_dist / entry_price
+                position_size = (equity * risk_per_trade) / stop_pct
                 position_size = min(position_size, equity * leverage)
                 in_position = True
 
         equity_curve.append(equity)
 
+    # Close any open position at end
     if in_position:
-        exit_price = close[-1]
+        exit_price_val = close[-1]
         if direction == 1:
-            raw_return = (exit_price - entry_price) / entry_price
+            raw_return = (exit_price_val - entry_price) / entry_price
         else:
-            raw_return = (entry_price - exit_price) / entry_price
+            raw_return = (entry_price - exit_price_val) / entry_price
         bars_held = n - 1 - entry_bar
         fee_cost = fee_rate * position_size
         funding_cost = funding_rate_8h * position_size * (bars_held / 32)
         net_pnl = raw_return * position_size - fee_cost - funding_cost
-        equity += net_pnl
+        equity = max(equity + net_pnl, 1.0)
         trades.append({
             "entry_bar": entry_bar, "exit_bar": n - 1,
             "direction": direction, "entry_price": entry_price,
-            "exit_price": exit_price, "hold_bars": bars_held,
+            "exit_price": exit_price_val, "hold_bars": bars_held,
             "raw_return": raw_return,
             "pnl_pct": net_pnl / position_size if position_size > 0 else 0,
             "pnl_usd": net_pnl, "fee_paid": fee_cost,

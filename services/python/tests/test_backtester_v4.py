@@ -6,15 +6,15 @@ import pandas as pd
 import pytest
 
 
-def make_trades_df(n: int = 100, seed: int = 42) -> pd.DataFrame:
+def make_trades_df(n: int = 200, seed: int = 42) -> pd.DataFrame:
     rng = np.random.RandomState(seed)
     ts = pd.date_range("2024-06-01", periods=n, freq="15min", tz="UTC")
     close = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
     high = close * (1 + rng.uniform(0, 0.005, n))
     low = close * (1 - rng.uniform(0, 0.005, n))
     conviction = rng.normal(0, 0.1, n)
-    conviction[10] = 0.25
-    conviction[50] = -0.25
+    conviction[60] = 0.25   # After ATR warmup (56 bars)
+    conviction[120] = -0.25
     return pd.DataFrame({
         "timestamp": ts, "close": close, "high": high, "low": low,
         "conviction": conviction,
@@ -52,16 +52,17 @@ def test_stop_loss_triggers():
     from src.ml.backtester_v4 import backtest_coin
     n = 100
     close = np.full(n, 100.0)
-    close[12:] = 94.0
+    close[72:] = 94.0  # 6% drop after entry at bar 70 (after ATR warmup)
     high = close + 0.1
     low = close - 0.1
-    low[12] = 93.0
+    low[72] = 93.0  # Low pierces stop
     conviction = np.zeros(n)
-    conviction[10] = 0.30
+    conviction[70] = 0.30  # Signal after ATR warmup (56 bars)
     df = pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="15min", tz="UTC"),
         "close": close, "high": high, "low": low, "conviction": conviction,
     })
+    # Use fixed stop so test is deterministic
     result = backtest_coin(df, conviction_threshold=0.20, stop_loss_pct=0.03)
     trades = result["trades"]
     assert len(trades) >= 1
