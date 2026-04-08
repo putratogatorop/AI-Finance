@@ -23,23 +23,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 RAW_DIR = Path("C:/Users/togat/Desktop/AI-Finance/data/raw/15m")
-MIN_VOLUME_USD = 500_000  # Skip illiquid coins
+MIN_VOLUME_USD = 1_000_000  # Skip illiquid coins
 MIN_BARS = 200  # Need enough history for volume average
 
-# Scanner parameters
-VOL_MULT = 3.0        # Volume must be 3x the 20-bar average
-PRICE_THRESH = 0.03   # 3% price change in 2 bars (30min)
+# Scanner parameters — TIGHTENED from v1
+VOL_MULT = 4.0        # Volume must be 4x the 20-bar average
+PRICE_THRESH = 0.035  # 3.5% price change in 2 bars
 LOOKBACK = 20         # 20-bar rolling window for volume average
 
 # Trade parameters
-PULLBACK_PCT = 0.03     # Wait for 3% pullback to enter
+PULLBACK_PCT = 0.02     # Wait for 2% pullback to enter (was 3%)
 ATR_STOP_MULT = 2.0     # Stop at 2x ATR from entry
-ATR_TP_MULT = 6.0       # TP at 6x ATR (3:1 R:R)
-MAX_HOLD_BARS = 32      # 8h max hold (32 x 15min bars)
+ATR_TP_MULT = 5.0       # TP at 5x ATR (2.5:1 R:R)
+MAX_HOLD_BARS = 48      # 12h max hold (48 x 15min bars) — longer to let winners run
 RISK_PER_TRADE = 0.02   # 2% equity risk
 MAX_LEVERAGE = 3.0
 MAX_CONCURRENT = 2
-MAX_DAILY_MOVE = 0.15   # Skip if already up >15%
+MAX_DAILY_MOVE = 0.10   # Skip if already up >10% (was 15%)
 
 # Regime filter
 BTC_TREND_PERIOD = 30   # 30 bars = 5 days on 4h for trend filter
