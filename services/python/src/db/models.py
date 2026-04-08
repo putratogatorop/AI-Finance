@@ -121,3 +121,29 @@ class FundingRate(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     funding_rate: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class ContractStats1h(Base):
+    __tablename__ = "contract_stats_1h"
+    __table_args__ = (UniqueConstraint("asset", "timestamp", name="uq_cstats_asset_ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    open_interest_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    long_liq_usd: Mapped[float] = mapped_column(Float, nullable=True)
+    short_liq_usd: Mapped[float] = mapped_column(Float, nullable=True)
+    lsr_taker: Mapped[float] = mapped_column(Float, nullable=True)
+    lsr_account: Mapped[float] = mapped_column(Float, nullable=True)
+    top_lsr_size: Mapped[float] = mapped_column(Float, nullable=True)
+    top_lsr_account: Mapped[float] = mapped_column(Float, nullable=True)
+
+
+class FearGreedIndex(Base):
+    __tablename__ = "fear_greed_index"
+    __table_args__ = (UniqueConstraint("date", name="uq_fgi_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)
+    classification: Mapped[str] = mapped_column(String(50), nullable=False)
