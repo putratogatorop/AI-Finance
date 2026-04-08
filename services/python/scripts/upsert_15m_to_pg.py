@@ -62,8 +62,10 @@ def load_symbol_csvs(symbol_dir: Path) -> list[dict]:
             reader = csv.DictReader(f)
             for row in reader:
                 try:
-                    ts_ms = int(row["open_time"])
-                    dt = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
+                    ts_raw = int(row["open_time"])
+                    # Binance Vision switched to microseconds (16 digits) in 2025
+                    ts_s = ts_raw / 1_000_000 if ts_raw > 1e13 else ts_raw / 1_000
+                    dt = datetime.fromtimestamp(ts_s, tz=UTC)
                     rows.append({
                         "asset": asset,
                         "timestamp": dt,
