@@ -110,8 +110,8 @@ def main():
     t0 = time.time()
     logger.info("Combined Experiment: Vol-Filter + Adaptive-ATR + ML-Filter")
     logger.info(f"  Vol filter:  ATR [{VOL_FILTER_LOW:.1%} – {VOL_FILTER_HIGH:.1%}]")
-    logger.info(f"  Adaptive ATR: Tier1=-2xATR(50%), Tier2=-3xATR(100%) | "
-                f"Trail: +3x→2xATR, +6x→3xATR, +10x→4xATR | Partial 33% @+5xATR")
+    logger.info("  Adaptive ATR: Tier1=-2xATR(50%), Tier2=-3xATR(100%) | "
+                "Trail: +3x->2xATR, +6x->3xATR, +10x->4xATR | Partial 33% @+5xATR")
     logger.info(f"  ML walk-forward: train={TRAIN_MONTHS}mo test={TEST_MONTHS}mo "
                 f"thresholds={ML_THRESHOLDS}")
 
@@ -281,8 +281,8 @@ def main():
         v_start = pd.to_datetime(test_df["signal_time"]).min().date()
         v_end   = pd.to_datetime(test_df["signal_time"]).max().date()
 
-        print(f"\nWindow {i+1}: train={t_start}→{t_end} ({len(train_df)}) "
-              f"test={v_start}→{v_end} ({len(test_df)})")
+        print(f"\nWindow {i+1}: train={t_start}->{t_end} ({len(train_df)}) "
+              f"test={v_start}->{v_end} ({len(test_df)})")
 
         X_train = train_df[FEATURE_COLS].values
         y_train = train_df["label"].values
