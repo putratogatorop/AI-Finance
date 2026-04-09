@@ -1,3 +1,4 @@
+
 # V6 Design Spec: Momentum Scanner + BTC-Alt Lead-Lag
 
 **Date:** 2026-04-09

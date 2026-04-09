@@ -1,6 +1,6 @@
 """Portfolio state tracker for RL trading environment."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from src.rl.config import RLConfig
 

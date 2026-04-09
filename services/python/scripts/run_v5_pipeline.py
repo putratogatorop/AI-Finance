@@ -165,9 +165,9 @@ def load_contract_stats(engine, asset: str) -> pd.DataFrame:
 
 def load_fear_greed(engine) -> pd.DataFrame:
     query = text("""
-        SELECT timestamp, value
+        SELECT date AS timestamp, value
         FROM fear_greed_index
-        ORDER BY timestamp
+        ORDER BY date
     """)
     with engine.connect() as conn:
         return pd.read_sql(query, conn)

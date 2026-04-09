@@ -2,15 +2,10 @@ import { prisma } from "@/lib/prisma";
 import ScannerTable from "@/components/scanner/scanner-table";
 
 export default async function ScannerPage() {
-  // Get recent signals (last 7 days)
+  // Get all signals (most recent first)
   const signals = await prisma.scannerSignal.findMany({
-    where: {
-      signal_time: {
-        gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      },
-    },
     orderBy: { signal_time: "desc" },
-    take: 100,
+    take: 200,
   });
 
   // Get summary stats

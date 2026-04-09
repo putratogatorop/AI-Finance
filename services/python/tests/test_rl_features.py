@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.rl.features import build_cross_token_features, build_indicator_features
 
