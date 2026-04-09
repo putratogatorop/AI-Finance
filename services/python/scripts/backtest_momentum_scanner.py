@@ -35,11 +35,11 @@ LOOKBACK = 20         # 20-bar rolling window for volume average
 PULLBACK_PCT = 0.02     # Wait for 2% pullback to enter (was 3%)
 ATR_STOP_MULT = 2.0     # Stop at 2x ATR from entry
 ATR_TP_MULT = 5.0       # TP at 5x ATR (2.5:1 R:R)
-MAX_HOLD_BARS = 96      # 24h max hold (96 x 15min bars) — let winners ride full daily move
+MAX_HOLD_BARS = 192     # 48h max hold (192 x 15min bars) — big moves play out over 1-2 days
 RISK_PER_TRADE = 0.02   # 2% equity risk
 MAX_LEVERAGE = 3.0
 MAX_CONCURRENT = 2
-MAX_DAILY_MOVE = 0.10   # Skip if already up >10% (was 15%)
+MAX_DAILY_MOVE = 0.30   # Skip if already up >30% (give room for big moves)
 
 # Regime filter
 BTC_TREND_PERIOD = 30   # 30 bars = 5 days on 4h for trend filter
