@@ -99,3 +99,42 @@ model AuditLog {
   @@index([event_type])
   @@map("audit_log")
 }
+
+model ScannerSignal {
+  id           Int      @id @default(autoincrement())
+  symbol       String   @db.VarChar(20)
+  direction    Int      // 1=LONG, -1=SHORT
+  ml_prob      Float    @map("ml_prob")
+  vol_ratio    Float    @map("vol_ratio")
+  price_change Float    @map("price_change")
+  signal_time  DateTime @db.Timestamptz() @map("signal_time")
+  status       String   @db.VarChar(20) @default("active") // active, traded, expired
+  pnl_pct      Float?   @map("pnl_pct")
+  exit_reason  String?  @db.VarChar(20) @map("exit_reason")
+  created_at   DateTime @default(now()) @db.Timestamptz() @map("created_at")
+
+  @@index([symbol])
+  @@index([signal_time])
+  @@index([status])
+  @@map("scanner_signals")
+}
+
+model AssetPrice15m {
+  id              Int      @id @default(autoincrement())
+  asset           String   @db.VarChar(20)
+  timestamp       DateTime @db.Timestamptz()
+  open            Float
+  high            Float
+  low             Float
+  close           Float
+  volume          Float
+  quote_volume    Float?   @map("quote_volume")
+  trades          Int?
+  taker_buy_base  Float?   @map("taker_buy_base")
+  taker_buy_quote Float?   @map("taker_buy_quote")
+
+  @@unique([asset, timestamp], name: "uq_15m_asset_ts")
+  @@index([asset])
+  @@index([timestamp])
+  @@map("asset_prices_15m")
+}
