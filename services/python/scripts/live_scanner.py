@@ -44,7 +44,8 @@ MAX_DAILY_MOVE = 0.30
 ML_THRESHOLD = 0.65
 
 SCAN_INTERVAL = 60  # seconds
-CANDLE_INTERVAL = 900  # 15 min in seconds
+CANDLE_INTERVAL = 900  # 15 min in seconds (for timing)
+CANDLE_INTERVAL_STR = "15m"  # Gate.io API format
 HISTORY_BARS = 200
 
 # Feature columns (same as ML filter)
@@ -98,7 +99,7 @@ def fetch_all_tickers() -> dict[str, dict]:
 
 
 def fetch_candles(
-    pair: str, interval: int = CANDLE_INTERVAL, limit: int = HISTORY_BARS
+    pair: str, interval: str = CANDLE_INTERVAL_STR, limit: int = HISTORY_BARS
 ) -> pd.DataFrame | None:
     """Fetch 15min candles for one pair from Gate.io."""
     url = (
