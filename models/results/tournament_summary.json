@@ -1,0 +1,246 @@
+{
+  "last_updated": "2026-04-09",
+  "approaches": [
+    {
+      "version": "v4.0",
+      "name": "3-Class LightGBM (15min)",
+      "description": "LightGBM multiclass (SHORT/FLAT/LONG) on 15min candles, 29 features",
+      "status": "FAILED",
+      "reason": "Predicted FLAT 99% of the time. 58% accuracy was illusion.",
+      "metrics": {
+        "win_rate": 0,
+        "profit_factor": 0,
+        "avg_winner": 0,
+        "avg_loser": 0,
+        "total_trades": 0,
+        "expectancy": 0
+      }
+    },
+    {
+      "version": "v4.1",
+      "name": "Binary Models (15min)",
+      "description": "Separate LONG vs rest + SHORT vs rest + regression ensemble",
+      "status": "FAILED",
+      "reason": "Conviction too weak. Features can't distinguish direction.",
+      "metrics": {
+        "win_rate": 0,
+        "profit_factor": 0,
+        "avg_winner": 0,
+        "avg_loser": 0,
+        "total_trades": 0,
+        "expectancy": 0
+      }
+    },
+    {
+      "version": "v4.2",
+      "name": "Binary Models (1h bars)",
+      "description": "Same as v4.1 but on 1h aggregated bars. Only AVAX slightly positive.",
+      "status": "FAILED",
+      "reason": "1h aggregation didn't fix the feature alpha problem.",
+      "metrics": {
+        "win_rate": 0.371,
+        "profit_factor": 0.55,
+        "avg_winner": 0.031,
+        "avg_loser": 0.026,
+        "total_trades": 97,
+        "expectancy": -0.005
+      }
+    },
+    {
+      "version": "v5.0",
+      "name": "Two-Stage Extreme Move Predictor",
+      "description": "Stage 1: predict IF big move, Stage 2: predict direction. With OI, liquidations, LSR features.",
+      "status": "FAILED",
+      "reason": "Zero trades generated. Models still couldn't fire above thresholds.",
+      "metrics": {
+        "win_rate": 0,
+        "profit_factor": 0,
+        "avg_winner": 0,
+        "avg_loser": 0,
+        "total_trades": 0,
+        "expectancy": 0
+      }
+    },
+    {
+      "version": "v6.0",
+      "name": "Momentum Scanner (loose filters)",
+      "description": "Scan 200 coins for volume+price breakouts. 3x vol, 3% price threshold. No ML filter.",
+      "status": "BREAKEVEN",
+      "reason": "First non-negative strategy. 62% stopped out — too many false breakouts.",
+      "metrics": {
+        "win_rate": 0.391,
+        "profit_factor": 0.98,
+        "avg_winner": 0.042,
+        "avg_loser": 0.028,
+        "total_trades": 2365,
+        "expectancy": -0.0004
+      }
+    },
+    {
+      "version": "v6.1",
+      "name": "Scanner + Tighter Filters",
+      "description": "4x vol, 3.5% price, $1M volume floor. Fewer but higher quality signals.",
+      "status": "PROFITABLE",
+      "reason": "First profitable version. PF 1.31.",
+      "metrics": {
+        "win_rate": 0.447,
+        "profit_factor": 1.31,
+        "avg_winner": 0.038,
+        "avg_loser": 0.025,
+        "total_trades": 537,
+        "expectancy": 0.0043
+      }
+    },
+    {
+      "version": "v6.2",
+      "name": "Scanner + ML Filter (original exits)",
+      "description": "Added LightGBM ML filter (14 features) on top of scanner. Walk-forward validated.",
+      "status": "PROFITABLE",
+      "reason": "ML filter pushes WR from 39% to 54-74% depending on threshold.",
+      "metrics": {
+        "win_rate": 0.572,
+        "profit_factor": 1.98,
+        "avg_winner": 0.038,
+        "avg_loser": 0.026,
+        "total_trades": 201,
+        "expectancy": 0.0108,
+        "thresholds": {
+          "0.55": {"wr": 0.54, "pf": 1.74, "trades": 250},
+          "0.60": {"wr": 0.572, "pf": 1.98, "trades": 201},
+          "0.65": {"wr": 0.614, "pf": 2.63, "trades": 153},
+          "0.70": {"wr": 0.633, "pf": 2.88, "trades": 128}
+        }
+      }
+    },
+    {
+      "version": "v6.3",
+      "name": "Scanner + ML + Wider Moves",
+      "description": "Widened too-late filter to 30%, extended hold to 48h. Catches monster moves like XRP +80%.",
+      "status": "PROFITABLE",
+      "reason": "Catches big moves. Top trade: MAGIC +16%. But avg winner still low at 5.9%.",
+      "metrics": {
+        "win_rate": 0.669,
+        "profit_factor": 2.99,
+        "avg_winner": 0.059,
+        "avg_loser": 0.04,
+        "total_trades": 154,
+        "expectancy": 0.0258,
+        "thresholds": {
+          "0.65": {"wr": 0.669, "pf": 2.99, "trades": 154},
+          "0.70": {"wr": 0.745, "pf": 3.84, "trades": 94}
+        }
+      }
+    },
+    {
+      "version": "v6.4",
+      "name": "Scanner + ML + ATR Trail + 19 Features",
+      "description": "ATR-based trailing stop (2.5x ATR), staged exits, 5 new ML features (consolidation, vol acceleration, concurrent breakouts, ATR compression, daily trend alignment).",
+      "status": "BEST",
+      "reason": "Avg winner jumped to +13.64%. PF 4.71-6.44. Captures 60-80% of moves.",
+      "metrics": {
+        "win_rate": 0.564,
+        "profit_factor": 4.71,
+        "avg_winner": 0.1364,
+        "avg_loser": 0.0399,
+        "total_trades": 287,
+        "expectancy": 0.0606,
+        "thresholds": {
+          "0.60": {"wr": 0.564, "pf": 4.71, "trades": 287},
+          "0.65": {"wr": 0.579, "pf": 5.24, "trades": 209},
+          "0.70": {"wr": 0.655, "pf": 6.44, "trades": 142}
+        }
+      }
+    },
+    {
+      "version": "v6.5-tiered",
+      "name": "Tiered Stop Loss (fixed %)",
+      "description": "Tiered SL: sell 50% at -3%, 75% at -4%, 100% at -5%. Widening trail: 2.5/3.5/5x ATR.",
+      "status": "BREAKEVEN",
+      "reason": "Fixed % SL doesn't work — treats BTC and ALPACA the same. Avg loser capped at 3.4% but WR dropped.",
+      "metrics": {
+        "win_rate": 0.376,
+        "profit_factor": 1.0,
+        "avg_winner": 0.056,
+        "avg_loser": 0.034,
+        "total_trades": 5205,
+        "expectancy": -0.0001
+      }
+    },
+    {
+      "version": "v6.5-adaptive",
+      "name": "Adaptive ATR Stops (all in ATR multiples)",
+      "description": "Everything in ATR multiples: SL at 2x/3x ATR, trail at 2x/3x/4x ATR. Auto-scales per coin.",
+      "status": "MIXED",
+      "reason": "Medium vol coins profitable (PF 1.08), high vol coins losing (PF 0.64). Need position sizing.",
+      "metrics": {
+        "win_rate": 0.403,
+        "profit_factor": 0.90,
+        "avg_winner": 0.053,
+        "avg_loser": 0.040,
+        "total_trades": 5205,
+        "expectancy": -0.0025,
+        "per_bucket": {
+          "medium_vol": {"wr": 0.418, "pf": 1.08, "trades": 3916},
+          "high_vol": {"wr": 0.356, "pf": 0.64, "trades": 1289}
+        }
+      }
+    },
+    {
+      "version": "v6.6-combined",
+      "name": "Vol Filter + Adaptive ATR + ML Filter",
+      "description": "Only medium-vol coins (ATR 0.3-2%), adaptive ATR stops, ML filter. Walk-forward.",
+      "status": "PROFITABLE",
+      "reason": "Clean medium-vol subset. PF 3.24 at 0.60 threshold.",
+      "metrics": {
+        "win_rate": 0.480,
+        "profit_factor": 3.24,
+        "avg_winner": 0.1101,
+        "avg_loser": 0.0314,
+        "total_trades": 398,
+        "expectancy": 0.0365,
+        "thresholds": {
+          "0.60": {"wr": 0.48, "pf": 3.24, "trades": 398},
+          "0.65": {"wr": 0.475, "pf": 3.39, "trades": 295},
+          "0.70": {"wr": 0.466, "pf": 3.40, "trades": 208}
+        }
+      }
+    },
+    {
+      "version": "v6.7-sizing",
+      "name": "ATR-Scaled Position Sizing (all coins)",
+      "description": "Trade ALL coins but scale position size inversely to volatility. High-vol = tiny position (lottery ticket). Equity simulation from $600.",
+      "status": "BEST-EQUITY",
+      "reason": "High-vol coins contribute with PF 3.40 on tiny positions. Medium-vol PF 2.45. Combined PF 3.65.",
+      "metrics": {
+        "win_rate": 0.507,
+        "profit_factor": 3.65,
+        "avg_winner": 0.0565,
+        "avg_loser": 0.0155,
+        "total_trades": 365,
+        "expectancy": 0.021,
+        "equity_start": 600,
+        "max_drawdown_pct": 0.694,
+        "per_bucket": {
+          "medium_vol": {"wr": 0.519, "pf": 2.45, "trades": 314, "dollar_pnl": 481090},
+          "high_vol": {"wr": 0.431, "pf": 3.40, "trades": 51, "dollar_pnl": 103923}
+        },
+        "thresholds": {
+          "0.60": {"wr": 0.507, "pf": 3.65, "trades": 365},
+          "0.65": {"wr": 0.541, "pf": 4.90, "trades": 270},
+          "0.70": {"wr": 0.585, "pf": 6.37, "trades": 193}
+        }
+      }
+    }
+  ],
+  "key_lessons": [
+    "ML cannot predict crypto direction on short timeframes — features are lagging",
+    "REACT to observable moves, don't PREDICT — scan for breakouts already happening",
+    "ML works as a FILTER (is this breakout real?) not as a signal generator",
+    "ATR-based everything — don't use fixed percentages, each coin has different volatility",
+    "Position size inversely to volatility — high-vol coins get tiny positions (lottery tickets)",
+    "Indonesian government bonds = 6%/yr — system must massively beat this",
+    "Target 70% WR in backtest because live degrades to 55-60%",
+    "Best hours: 20:00-02:00 WIB (US session)"
+  ],
+  "current_live": "v6.4 (Scanner + ML + ATR Trail + 19 Features) running as paper trading daemon"
+}
