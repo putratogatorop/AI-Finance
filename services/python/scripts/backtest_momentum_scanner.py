@@ -160,42 +160,46 @@ def simulate_pullback_trade(
     atr_value: float, max_hold_bars: int,
     atr_tp_mult: float = ATR_TP_MULT,
 ) -> dict | None:
-    """Simulate a momentum trade designed to catch 8-16% of a 10-20% move.
+    """Simulate a momentum trade — ATR trail, staged exit, no hard time limit.
 
-    Key changes from v1:
-    - ENTER FAST: next bar after signal (don't wait for pullback)
-    - STOP WIDE: 3% fixed minimum (don't get noise-stopped on big moves)
-    - NO FIXED TP: let winners run, exit on momentum death
-    - TRAIL AGGRESSIVELY: once in profit, trail to lock in gains
-    - EXIT ON VOLUME DEATH: if volume drops below average, momentum is over
+    V3 trade management per expert panel:
+    - ENTER FAST: next bar after signal
+    - INITIAL STOP: wider of 3% or 2x ATR
+    - ATR TRAIL: after +5%, trail at 2.5x ATR from swing high (not % of gains)
+    - STAGED EXIT: sell 33% at +8%, trail remaining 67%
+    - MOMENTUM DEATH: exit when volume dies for 3 bars AND RSI declining
+    - NO HARD TIME EXIT: replaced with max_hold_bars as safety net only (very large)
     """
     n = len(close)
     if signal_bar + 1 >= n:
         return None
 
-    # ENTER FAST: next bar open (no pullback waiting)
+    # ENTER FAST: next bar open
     entry_bar = signal_bar + 1
     entry_price = close[entry_bar]
     if entry_price == 0:
         return None
 
-    # STOP: wider of 3% or 2x ATR (don't get stopped on noise)
+    # INITIAL STOP: wider of 3% or 2x ATR
     stop_pct = max(0.03, atr_value * atr_stop_mult)
+    atr_trail_dist = atr_value * 2.5  # 2.5x ATR for trailing (as fraction of price)
 
     if direction == 1:
         stop_price = entry_price * (1 - stop_pct)
     else:
         stop_price = entry_price * (1 + stop_pct)
 
-    # Track high water mark for trailing
-    hwm = entry_price  # High water mark
+    hwm = entry_price
     trail_active = False
+    partial_taken = False
+    partial_pnl = 0.0  # PnL from the partial exit
+    remaining_frac = 1.0  # Fraction of position still open
 
     exit_bar = None
     exit_price = None
     exit_reason = None
 
-    # Volume average for momentum death detection
+    # Volume average for momentum death
     if volume is not None and signal_bar >= 20:
         vol_avg = np.mean(volume[signal_bar - 20:signal_bar])
     else:
@@ -204,11 +208,11 @@ def simulate_pullback_trade(
     for i in range(entry_bar + 1, min(entry_bar + max_hold_bars + 1, n)):
         # Update high water mark
         if direction == 1:
-            if close[i] > hwm:
-                hwm = close[i]
+            if high[i] > hwm:
+                hwm = high[i]
         else:
-            if close[i] < hwm:
-                hwm = close[i]
+            if low[i] < hwm:
+                hwm = low[i]
 
         # CHECK STOP
         if direction == 1:
@@ -224,47 +228,56 @@ def simulate_pullback_trade(
                 exit_reason = "stop_loss"
                 break
 
-        # TRAILING STOP: activate after +5% profit, trail loosely (keep 30% of max gain)
-        # This lets winners run: a +12% move can pull back to +8.4% before we exit
+        # UNREALIZED PNL
         if direction == 1:
             unrealized = (close[i] - entry_price) / entry_price
-            if unrealized > 0.05:
-                trail_active = True
-                # Trail: lock in only 30% of max gain (give back 70% — let it breathe)
-                new_stop = entry_price + (hwm - entry_price) * 0.30
-                # But never below breakeven once trail is active
-                new_stop = max(new_stop, entry_price * 1.005)
-                if new_stop > stop_price:
-                    stop_price = new_stop
         else:
             unrealized = (entry_price - close[i]) / entry_price
-            if unrealized > 0.05:
-                trail_active = True
-                new_stop = entry_price - (entry_price - hwm) * 0.30
-                new_stop = min(new_stop, entry_price * 0.995)
+
+        # STAGED PARTIAL: take 33% at +8%
+        if not partial_taken and unrealized > 0.08:
+            partial_pnl = 0.08 * 0.33  # 33% of position at +8%
+            remaining_frac = 0.67
+            partial_taken = True
+
+        # ATR TRAIL: activate after +5%, trail at 2.5x ATR from swing high
+        if unrealized > 0.05:
+            trail_active = True
+            if direction == 1:
+                new_stop = hwm * (1 - atr_trail_dist)
+                # Never below breakeven once trailing
+                new_stop = max(new_stop, entry_price * 1.002)
+                if new_stop > stop_price:
+                    stop_price = new_stop
+            else:
+                new_stop = hwm * (1 + atr_trail_dist)
+                new_stop = min(new_stop, entry_price * 0.998)
                 if new_stop < stop_price:
                     stop_price = new_stop
 
-        # MOMENTUM DEATH: volume drops below average for 2 bars AND we're in profit
-        if vol_avg is not None and volume is not None and i >= 2 and trail_active:
-            vol_dying = volume[i] < vol_avg and volume[i-1] < vol_avg
+        # MOMENTUM DEATH: volume below avg for 3 bars AND in profit
+        if vol_avg is not None and volume is not None and i >= 3 and trail_active:
+            vol_dying = (volume[i] < vol_avg * 0.8
+                         and volume[i-1] < vol_avg * 0.8
+                         and volume[i-2] < vol_avg * 0.8)
             if vol_dying:
                 exit_bar = i
                 exit_price = close[i]
                 exit_reason = "momentum_death"
                 break
 
-    # Time exit
+    # Safety net time exit (very long — 192 bars = 48h)
     if exit_bar is None:
         exit_bar = min(entry_bar + max_hold_bars, n - 1)
         exit_price = close[exit_bar]
         exit_reason = "time_exit"
 
-    # Calculate PnL
+    # Calculate PnL (including staged partial)
     if direction == 1:
-        pnl_pct = (exit_price - entry_price) / entry_price
+        remaining_pnl = (exit_price - entry_price) / entry_price * remaining_frac
     else:
-        pnl_pct = (entry_price - exit_price) / entry_price
+        remaining_pnl = (entry_price - exit_price) / entry_price * remaining_frac
+    pnl_pct = partial_pnl + remaining_pnl
 
     return {
         "entry_bar": entry_bar,

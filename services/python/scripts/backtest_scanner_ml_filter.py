@@ -69,11 +69,13 @@ MIN_TRAIN_SIGNALS = 200
 # LightGBM params — simple to avoid overfitting on small dataset
 ML_PARAMS = {
     "objective": "binary",
-    "num_leaves": 15,
-    "min_child_samples": 30,
-    "learning_rate": 0.05,
-    "n_estimators": 200,
-    "feature_fraction": 0.8,
+    "num_leaves": 23,          # Slightly more capacity for 19 features
+    "min_child_samples": 25,
+    "learning_rate": 0.03,
+    "n_estimators": 400,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 3,
     "verbose": -1,
     "random_state": 42,
 }
@@ -93,6 +95,12 @@ FEATURE_COLS = [
     "btc_vol_ratio",
     "hour_of_day",
     "day_of_week",
+    # NEW P1 features
+    "consolidation_bars",     # How long price was in a tight range before breakout
+    "vol_acceleration",       # 3-bar volume acceleration (rising = real)
+    "num_concurrent",         # How many other coins broke out in same window
+    "atr_compression",        # ATR squeeze before breakout (low = coiled energy)
+    "daily_trend_alignment",  # Is 96-bar (daily) EMA slope aligned with direction?
 ]
 
 
@@ -104,6 +112,8 @@ def extract_features(
     btc_times: np.ndarray,
     sig_vol_ratio: float,
     sig_price_change: float,
+    atr_14: np.ndarray | None = None,
+    atr_96: np.ndarray | None = None,
 ) -> dict | None:
     """Extract ML features at signal bar."""
     close = df["close"].values.astype(float)
@@ -208,6 +218,55 @@ def extract_features(
     hour_of_day = sig_ts.hour
     day_of_week = sig_ts.dayofweek
 
+    # --- NEW P1 features ---
+
+    # Use pre-computed ATR arrays if provided, else compute (slow fallback)
+    if atr_14 is not None:
+        atr_arr = atr_14
+    else:
+        atr_arr = compute_atr(high, low, close, period=14)
+    if atr_96 is not None:
+        atr_long = atr_96
+    else:
+        atr_long = compute_atr(high, low, close, period=96)
+
+    # 1. Consolidation duration: count bars where ATR was below median (cheap proxy)
+    consolidation_bars = 0
+    if bar >= 20:
+        recent_atr = atr_arr[max(0, bar-50):bar]
+        recent_atr = recent_atr[~np.isnan(recent_atr)]
+        if len(recent_atr) > 0:
+            atr_median = np.median(recent_atr)
+            for j in range(bar - 1, max(bar - 100, 0), -1):
+                if j < len(atr_arr) and not np.isnan(atr_arr[j]) and atr_arr[j] < atr_median:
+                    consolidation_bars += 1
+                else:
+                    break
+
+    # 2. Volume acceleration: rate of change of volume over 3 bars
+    if bar >= 3 and volume[bar - 2] > 0:
+        vol_acceleration = (volume[bar] - volume[bar - 2]) / volume[bar - 2]
+    else:
+        vol_acceleration = 0.0
+
+    # 3. Concurrent breakouts: placeholder — filled by caller
+    num_concurrent = 0
+
+    # 4. ATR compression: current ATR / long ATR (low = coiled, ready to explode)
+    if bar < len(atr_arr) and not np.isnan(atr_arr[bar]) and not np.isnan(atr_long[bar]) and atr_long[bar] > 0:
+        atr_compression = atr_arr[bar] / atr_long[bar]
+    else:
+        atr_compression = 1.0
+
+    # 5. Daily trend alignment: 96-bar EMA slope * direction (positive = aligned)
+    if bar >= 96:
+        ema_96 = pd.Series(close[:bar+1]).ewm(span=96).mean().values
+        ema_slope = (ema_96[bar] - ema_96[bar - 24]) / ema_96[bar - 24] if ema_96[bar - 24] > 0 else 0
+        # Multiply by direction: positive = trend aligned with trade
+        daily_trend_alignment = ema_slope * (1 if sig_price_change > 0 else -1)
+    else:
+        daily_trend_alignment = 0.0
+
     return {
         "vol_ratio": vol_ratio,
         "price_change": price_change,
@@ -223,6 +282,11 @@ def extract_features(
         "btc_vol_ratio": btc_vol_ratio,
         "hour_of_day": hour_of_day,
         "day_of_week": day_of_week,
+        "consolidation_bars": consolidation_bars,
+        "vol_acceleration": vol_acceleration,
+        "num_concurrent": num_concurrent,
+        "atr_compression": atr_compression,
+        "daily_trend_alignment": daily_trend_alignment,
     }
 
 
@@ -373,8 +437,10 @@ def main():
 
         coins_with_signals += 1
 
-        # Compute ATR
+        # Compute ATR (precompute for all signals on this coin)
         atr = compute_atr(high, low, close)
+        atr_14 = atr  # period=14 is the default
+        atr_96 = compute_atr(high, low, close, period=96)
 
         for sig in signals:
             bar = sig["bar"]
@@ -421,6 +487,8 @@ def main():
                 btc_times=btc_times,
                 sig_vol_ratio=sig["volume_ratio"],
                 sig_price_change=sig["price_change"],
+                atr_14=atr_14,
+                atr_96=atr_96,
             )
             if feats is None:
                 continue
@@ -449,6 +517,12 @@ def main():
     signals_df = pd.DataFrame(all_signals)
     signals_df["signal_time"] = pd.to_datetime(signals_df["signal_time"])
     signals_df = signals_df.sort_values("signal_time").reset_index(drop=True)
+
+    # Fill num_concurrent: count signals within same 15min window
+    signals_df["time_bucket"] = signals_df["signal_time"].dt.floor("15min")
+    concurrent_counts = signals_df.groupby("time_bucket").size()
+    signals_df["num_concurrent"] = signals_df["time_bucket"].map(concurrent_counts)
+    signals_df = signals_df.drop(columns=["time_bucket"])
 
     # Sanity check features
     for col in FEATURE_COLS:
