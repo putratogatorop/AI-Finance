@@ -14,6 +14,7 @@ interface Props {
     strategy?: string;
     exitReason?: string;
     page?: string;
+    simPage?: string;
     monthPage?: string;
     coinPage?: string;
   }>;
@@ -22,6 +23,7 @@ interface Props {
 export default async function ScannerLongPage({ searchParams }: Props) {
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page || "1") || 1);
+  const simPage = Math.max(1, parseInt(params.simPage || "1") || 1);
   const monthPage = Math.max(1, parseInt(params.monthPage || "1") || 1);
   const coinPage = Math.max(1, parseInt(params.coinPage || "1") || 1);
   const strategyFilter = params.strategy || "all";
@@ -68,6 +70,97 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   // Determine winner (highest PF)
   const winner = (["A", "B", "C"] as const).reduce((best, s) =>
     strategyStats[s].pf > strategyStats[best].pf ? s : best, "A" as string);
+
+  // Realistic simulation: up to 3 trades/day, 10% position size, compounding
+  const SIM_CAPITAL = 600;
+  const SIM_POSITION_PCT = 0.10; // 10% of portfolio per trade
+  const SIM_MAX_TRADES_DAY = 3;
+  let simTrades: any[] = [];
+  let simTotal = 0;
+  let simStats = { trades: 0, wins: 0, wr: 0, pf: 0, finalEquity: 0, totalReturn: 0, months: 0, monthlyAvg: 0 };
+  try {
+    // Pick up to 3 trades per day from winning strategy, ordered by signal_time
+    const simCountRows: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::int as n FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        FROM scanner_long_backtest WHERE strategy = '${winner}'
+      ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
+    `);
+    simTotal = simCountRows[0]?.n || 0;
+
+    // Overall sim stats
+    const simStatsRows: any[] = await prisma.$queryRawUnsafe(`
+      WITH daily AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        FROM scanner_long_backtest WHERE strategy = '${winner}'
+      ),
+      filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
+      SELECT COUNT(*)::int as trades,
+        COUNT(*) FILTER (WHERE pnl_pct > 0)::int as wins,
+        ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
+        ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/
+          ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
+        COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as months
+      FROM filtered
+    `);
+    if (simStatsRows[0]) {
+      const s = simStatsRows[0];
+      simStats.trades = s.trades;
+      simStats.wins = s.wins;
+      simStats.wr = Number(s.wr) || 0;
+      simStats.pf = Number(s.pf) || 0;
+      simStats.months = s.months || 1;
+    }
+
+    // Get paginated trades with running equity (compounding 10% position)
+    // Each trade's dollar PnL = equity * 0.10 * pnl_pct, new equity = old + dollar_pnl
+    simTrades = await prisma.$queryRawUnsafe(`
+      WITH daily AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        FROM scanner_long_backtest WHERE strategy = '${winner}'
+      ),
+      filtered AS (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
+        FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY}
+      ),
+      with_equity AS (
+        SELECT *,
+          ${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} *
+            SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+          as equity,
+          ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * pnl_pct as trade_pnl_usd,
+          SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cum_pnl_raw
+        FROM filtered
+      )
+      SELECT trade_num, symbol, signal_time, entry_price, exit_price,
+        pnl_pct, exit_reason, bars_held,
+        ROUND(trade_pnl_usd::numeric, 2) as trade_pnl_usd,
+        ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
+        ROUND(equity::numeric, 0) as equity
+      FROM with_equity
+      ORDER BY signal_time DESC, symbol
+      LIMIT ${PER_PAGE} OFFSET ${(simPage - 1) * PER_PAGE}
+    `);
+
+    // Get final equity
+    const finalEq: any[] = await prisma.$queryRawUnsafe(`
+      WITH daily AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        FROM scanner_long_backtest WHERE strategy = '${winner}'
+      ),
+      filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
+      SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
+        ROUND((${SIM_POSITION_PCT} * SUM(pnl_pct) * 100)::numeric, 1) as total_return
+      FROM filtered
+    `);
+    if (finalEq[0]) {
+      simStats.finalEquity = Number(finalEq[0].final_eq) || SIM_CAPITAL;
+      simStats.totalReturn = Number(finalEq[0].total_return) || 0;
+      simStats.monthlyAvg = simStats.months > 0
+        ? Math.round(simStats.totalReturn / simStats.months * 10) / 10
+        : 0;
+    }
+  } catch {}
 
   // Monthly performance for winning strategy (paginated)
   let monthly: any[] = [];
@@ -134,6 +227,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     `);
   } catch {}
 
+  const simPages = Math.max(1, Math.ceil(simTotal / PER_PAGE));
   const monthPages = Math.max(1, Math.ceil(monthlyTotal / PER_PAGE));
   const coinPages = Math.max(1, Math.ceil(coinsTotal / PER_PAGE));
   const tradePages = Math.max(1, Math.ceil(totalTrades / PER_PAGE));
@@ -141,6 +235,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   function pg(key: string, val: number) {
     const p = new URLSearchParams();
     if (key !== "page") p.set("page", String(page));
+    if (key !== "simPage") p.set("simPage", String(simPage));
     if (key !== "monthPage") p.set("monthPage", String(monthPage));
     if (key !== "coinPage") p.set("coinPage", String(coinPage));
     if (strategyFilter !== "all") p.set("strategy", strategyFilter);
@@ -207,6 +302,84 @@ export default async function ScannerLongPage({ searchParams }: Props) {
             </div>
           );
         })}
+      </div>
+
+      {/* Realistic Simulation */}
+      <div className="card overflow-hidden p-0">
+        <div className="px-4 py-3 border-b border-[var(--border)]">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-200">
+                Realistic Simulation — $600 Capital, 10% Position, Up to 3 Trades/Day
+              </h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                Strategy {winner} ({STRATEGY_LABELS[winner]}). Each trade risks 10% of portfolio. Compounding equity. Max 3 trades/day (best PnL first).
+              </p>
+            </div>
+            <Pager current={simPage} total={simPages} paramKey="simPage" buildHref={pg} />
+          </div>
+          {/* Sim KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3">
+            <MiniKPI label="Sim Trades" value={simStats.trades.toLocaleString()} />
+            <MiniKPI label="Win Rate" value={`${simStats.wr}%`} color={simStats.wr > 50 ? "green" : "red"} />
+            <MiniKPI label="Profit Factor" value={simStats.pf.toFixed(2)} color={simStats.pf > 1 ? "green" : "red"} />
+            <MiniKPI label="Final Equity" value={`$${simStats.finalEquity.toLocaleString()}`} color={simStats.finalEquity > SIM_CAPITAL ? "green" : "red"} />
+            <MiniKPI label="Total Return" value={`${simStats.totalReturn > 0 ? "+" : ""}${simStats.totalReturn}%`} color={simStats.totalReturn > 0 ? "green" : "red"} />
+            <MiniKPI label="Avg/Month" value={`${simStats.monthlyAvg > 0 ? "+" : ""}${simStats.monthlyAvg}%`} color={simStats.monthlyAvg > 0 ? "green" : "red"} />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-[var(--border)]">
+                <th className="px-3 py-2 text-center text-slate-500">#</th>
+                <th className="px-3 py-2 text-left text-slate-500">Date</th>
+                <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
+                <th className="px-3 py-2 text-right text-slate-500">Entry</th>
+                <th className="px-3 py-2 text-right text-slate-500">Exit</th>
+                <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
+                <th className="px-3 py-2 text-right text-slate-500">PnL $</th>
+                <th className="px-3 py-2 text-center text-slate-500">Exit</th>
+                <th className="px-3 py-2 text-right text-slate-500">Bars</th>
+                <th className="px-3 py-2 text-right text-slate-500">Cum PnL</th>
+                <th className="px-3 py-2 text-right text-slate-500">Equity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {simTrades.map((t: any, i: number) => (
+                <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
+                  <td className="px-3 py-1.5 text-center text-slate-500 font-mono">{Number(t.trade_num)}</td>
+                  <td className="px-3 py-1.5 text-slate-300 font-mono whitespace-nowrap">
+                    {new Date(t.signal_time).toLocaleDateString("en-CA")}
+                  </td>
+                  <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.entry_price).toPrecision(4)}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.exit_price).toPrecision(4)}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono font-bold ${Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(t.pnl_pct) > 0 ? "+" : ""}{(Number(t.pnl_pct) * 100).toFixed(1)}%
+                  </td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(t.trade_pnl_usd) > 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(t.trade_pnl_usd) > 0 ? "+" : ""}${Number(t.trade_pnl_usd).toFixed(2)}
+                  </td>
+                  <td className="px-3 py-1.5 text-center">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      t.exit_reason === "take_profit" ? "bg-green-900/50 text-green-400" :
+                      t.exit_reason === "stop_loss" ? "bg-red-900/50 text-red-400" :
+                      "bg-slate-700 text-slate-400"
+                    }`}>{t.exit_reason}</span>
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">{t.bars_held}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(t.cum_pnl_pct) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(t.cum_pnl_pct) > 0 ? "+" : ""}{Number(t.cum_pnl_pct)}%
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-white font-bold">
+                    ${Number(t.equity).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Strategy Comparison Table */}
