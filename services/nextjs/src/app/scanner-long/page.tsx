@@ -82,7 +82,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     // Pick up to 3 trades per day from winning strategy, ordered by signal_time
     const simCountRows: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int as n FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
         FROM scanner_long_backtest WHERE strategy = '${winner}'
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
     `);
@@ -91,7 +91,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     // Overall sim stats
     const simStatsRows: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
         FROM scanner_long_backtest WHERE strategy = '${winner}'
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
@@ -116,7 +116,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     // Each trade's dollar PnL = equity * 0.10 * pnl_pct, new equity = old + dollar_pnl
     simTrades = await prisma.$queryRawUnsafe(`
       WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
         FROM scanner_long_backtest WHERE strategy = '${winner}'
       ),
       filtered AS (
@@ -145,7 +145,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     // Get final equity
     const finalEq: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY pnl_pct DESC) as rn
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
         FROM scanner_long_backtest WHERE strategy = '${winner}'
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
