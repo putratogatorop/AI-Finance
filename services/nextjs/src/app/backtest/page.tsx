@@ -4,21 +4,12 @@ import { useEffect, useState } from "react";
 import { PerformanceChart } from "@/components/charts/performance-chart";
 import {
   formatIDR,
-  formatIDRCompact,
   formatPercent,
   getPnlColor,
 } from "@/lib/format";
-import type { BacktestResult } from "@/types";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Cell,
-} from "recharts";
+import type { BacktestResult, PeriodBreakdown } from "@/types";
+import { ProfitConsistencyChart } from "@/components/charts/profit-consistency-chart";
+import { ConsistencyStats } from "@/components/charts/consistency-stats";
 
 export default function BacktestPage() {
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -70,6 +61,23 @@ export default function BacktestPage() {
   }
 
   const { metrics, monthly, equity_curve } = result;
+  const { weekly } = result;
+
+  const monthlyPeriods: PeriodBreakdown[] = monthly.map((m) => ({
+    label: m.month,
+    return_idr: m.return_idr,
+    return_pct: m.return_pct,
+    trades: m.trades,
+    win_rate: m.win_rate,
+  }));
+
+  const weeklyPeriods: PeriodBreakdown[] = weekly.map((w) => ({
+    label: w.week,
+    return_idr: w.return_idr,
+    return_pct: w.return_pct,
+    trades: w.trades,
+    win_rate: w.win_rate,
+  }));
 
   return (
     <div className="space-y-6">
@@ -117,51 +125,25 @@ export default function BacktestPage() {
         <PerformanceChart data={equity_curve} startingValue={0} />
       </div>
 
-      {/* Monthly breakdown chart */}
-      {monthly.length > 0 && (
+      {/* Profit Consistency */}
+      {monthlyPeriods.length > 0 && (
         <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-slate-100">
-            Monthly Returns
+          <h2 className="mb-2 text-lg font-semibold text-slate-100">
+            Profit Consistency
           </h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={monthly} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="month"
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
-                tickLine={{ stroke: "#475569" }}
-                axisLine={{ stroke: "#475569" }}
-              />
-              <YAxis
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
-                tickLine={{ stroke: "#475569" }}
-                axisLine={{ stroke: "#475569" }}
-                tickFormatter={(value: number) => formatIDRCompact(value)}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1e293b",
-                  border: "1px solid #334155",
-                  borderRadius: "8px",
-                  color: "#f1f5f9",
-                }}
-                formatter={(value: number, name: string) => {
-                  if (name === "return_idr") return [formatIDR(value), "Return"];
-                  return [value, name];
-                }}
-              />
-              <Bar dataKey="return_idr" name="return_idr" radius={[4, 4, 0, 0]}>
-                {monthly.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={entry.return_idr >= 0 ? "#22c55e" : "#ef4444"}
-                    opacity={0.8}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <ProfitConsistencyChart
+            monthly={monthlyPeriods}
+            weekly={weeklyPeriods}
+          />
         </div>
+      )}
+
+      {/* Consistency Stats */}
+      {monthlyPeriods.length > 0 && (
+        <ConsistencyStats
+          data={monthlyPeriods}
+          granularity="monthly"
+        />
       )}
 
       {/* Monthly breakdown table */}
