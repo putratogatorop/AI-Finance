@@ -147,3 +147,73 @@ class FearGreedIndex(Base):
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     value: Mapped[int] = mapped_column(Integer, nullable=False)
     classification: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
+class VolumeBreakout(Base):
+    __tablename__ = "volume_breakouts"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "signal_time", name="uq_vb_sym_tf_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(4), nullable=False, index=True)
+    signal_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    # Breakout bar OHLCV
+    open: Mapped[float] = mapped_column(Float, nullable=False)
+    high: Mapped[float] = mapped_column(Float, nullable=False)
+    low: Mapped[float] = mapped_column(Float, nullable=False)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    volume: Mapped[float] = mapped_column(Float, nullable=False)
+    quote_volume: Mapped[float] = mapped_column(Float, nullable=False)
+    trades: Mapped[int] = mapped_column(Integer, nullable=True)
+
+    # Volume context
+    vol_ratio: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    vol_avg_20: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Price context
+    price_change_1bar: Mapped[float] = mapped_column(Float, nullable=True)
+    price_change_2bar: Mapped[float] = mapped_column(Float, nullable=True)
+    atr_14: Mapped[float] = mapped_column(Float, nullable=True)
+    bar_range_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    upper_wick_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    lower_wick_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    body_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    direction: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Wider context
+    dist_from_20_high: Mapped[float] = mapped_column(Float, nullable=True)
+    dist_from_20_low: Mapped[float] = mapped_column(Float, nullable=True)
+    price_vs_ema_50: Mapped[float] = mapped_column(Float, nullable=True)
+    rsi_14: Mapped[float] = mapped_column(Float, nullable=True)
+    volatility_20: Mapped[float] = mapped_column(Float, nullable=True)
+
+    # BTC context
+    btc_price: Mapped[float] = mapped_column(Float, nullable=True)
+    btc_ret_24bar: Mapped[float] = mapped_column(Float, nullable=True)
+    btc_ret_96bar: Mapped[float] = mapped_column(Float, nullable=True)
+    btc_vol_ratio: Mapped[float] = mapped_column(Float, nullable=True)
+
+    # Forward returns
+    fwd_ret_12h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_ret_24h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_ret_48h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_ret_1w: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_ret_2w: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_ret_1m: Mapped[float] = mapped_column(Float, nullable=True)
+
+    # Forward extremes (MFE/MAE)
+    fwd_max_gain_12h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_gain_24h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_gain_48h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_gain_1w: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_loss_12h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_loss_24h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_loss_48h: Mapped[float] = mapped_column(Float, nullable=True)
+    fwd_max_loss_1w: Mapped[float] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.now
+    )
