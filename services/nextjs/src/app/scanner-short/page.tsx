@@ -118,7 +118,8 @@ export default async function ScannerShortPage({ searchParams }: Props) {
       simStats.months = s.months || 1;
     }
 
-    simTrades = await prisma.$queryRawUnsafe(`
+    // Fetch all sim trades (for compounding calculation)
+    const allSimTrades: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
@@ -128,45 +129,43 @@ export default async function ScannerShortPage({ searchParams }: Props) {
       filtered AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
         FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY}
-      ),
-      with_equity AS (
-        SELECT *,
-          ${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} *
-            SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-          as equity,
-          ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * pnl_pct as trade_pnl_usd,
-          SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cum_pnl_raw
-        FROM filtered
       )
       SELECT trade_num, symbol, signal_time, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held, ml_prob,
-        ROUND(trade_pnl_usd::numeric, 2) as trade_pnl_usd,
-        ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
-        ROUND(equity::numeric, 0) as equity
-      FROM with_equity
-      ORDER BY signal_time DESC, symbol
-      LIMIT ${PER_PAGE} OFFSET ${(simPage - 1) * PER_PAGE}
+        pnl_pct, exit_reason, bars_held, ml_prob
+      FROM filtered
+      ORDER BY signal_time ASC, symbol
     `);
 
-    const finalEq: any[] = await prisma.$queryRawUnsafe(`
-      WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY signal_time::date ORDER BY signal_time ASC
-        ) as rn
-        FROM ${SIM_TABLE}
-      ),
-      filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
-      SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
-        ROUND((${SIM_POSITION_PCT} * SUM(pnl_pct) * 100)::numeric, 1) as total_return
-      FROM filtered
-    `);
-    if (finalEq[0]) {
-      simStats.finalEquity = Number(finalEq[0].final_eq) || SIM_CAPITAL;
-      simStats.totalReturn = Number(finalEq[0].total_return) || 0;
-      simStats.monthlyAvg = simStats.months > 0
-        ? Math.round(simStats.totalReturn / simStats.months * 10) / 10
-        : 0;
-    }
+    // Compute compounding equity in JS (SQL can't do this properly)
+    let equity = SIM_CAPITAL;
+    const enriched = allSimTrades.map((t: any) => {
+      const pnl = Number(t.pnl_pct);
+      const posSize = equity * SIM_POSITION_PCT;
+      const tradePnlUsd = posSize * pnl;
+      equity += tradePnlUsd;
+      return {
+        ...t,
+        trade_pnl_usd: Math.round(tradePnlUsd * 100) / 100,
+        equity: Math.round(equity),
+        cum_return_pct: Math.round((equity / SIM_CAPITAL - 1) * 1000) / 10,
+      };
+    });
+
+    simStats.finalEquity = Math.round(equity);
+    simStats.totalReturn = Math.round((equity / SIM_CAPITAL - 1) * 1000) / 10;
+    simStats.monthlyAvg = simStats.months > 0
+      ? Math.round(simStats.totalReturn / simStats.months * 10) / 10
+      : 0;
+
+    // Paginate (reverse for display — newest first)
+    const reversed = [...enriched].reverse();
+    const start = (simPage - 1) * PER_PAGE;
+    simTrades = reversed.slice(start, start + PER_PAGE).map((t: any) => ({
+      ...t,
+      trade_pnl_usd: t.trade_pnl_usd,
+      cum_pnl_pct: t.cum_return_pct,
+      equity: t.equity,
+    }));
   } catch {}
 
   // ── Monthly Performance (v2 + ML, paginated) ──
