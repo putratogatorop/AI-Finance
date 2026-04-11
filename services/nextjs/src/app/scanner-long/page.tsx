@@ -100,7 +100,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/
           ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
-        COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as months
+        COUNT(DISTINCT date_trunc('month', signal_time))::int as months
       FROM filtered
     `);
     if (simStatsRows[0]) {
@@ -167,12 +167,12 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as n
+      SELECT COUNT(DISTINCT date_trunc('month', signal_time))::int as n
       FROM scanner_long_blind
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
-      SELECT date_trunc('month', signal_time::timestamptz) as month,
+      SELECT date_trunc('month', signal_time) as month,
         COUNT(*)::int as trades,
         COUNT(*) FILTER (WHERE pnl_pct > 0)::int as wins,
         COUNT(*) FILTER (WHERE pnl_pct <= 0)::int as losses,

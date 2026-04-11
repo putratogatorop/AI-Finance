@@ -271,7 +271,7 @@ def scan_coin(symbol, df, btc_times, btc_close, btc_ema):
         trade = simulate_trade(close, high, low, i)
         if trade:
             trade["symbol"] = symbol
-            trade["signal_time"] = str(times[i])
+            trade["signal_time"] = pd.Timestamp(times[i])
             # Attach ML features
             trade["vol_ratio"] = vol_ratio
             trade["price_move"] = price_move

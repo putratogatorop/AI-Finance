@@ -71,7 +71,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     const simCountRows: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int as n FROM (
         SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY signal_time::timestamptz::date ORDER BY signal_time::timestamptz ASC
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
         FROM scanner_short_ml_filtered
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
@@ -81,7 +81,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     const simStatsRows: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY signal_time::timestamptz::date ORDER BY signal_time::timestamptz ASC
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
         FROM scanner_short_ml_filtered
       ),
@@ -91,7 +91,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/
           ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
-        COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as months
+        COUNT(DISTINCT date_trunc('month', signal_time))::int as months
       FROM filtered
     `);
     if (simStatsRows[0]) {
@@ -106,21 +106,21 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     simTrades = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY signal_time::timestamptz::date ORDER BY signal_time::timestamptz ASC
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
         FROM scanner_short_ml_filtered
       ),
       filtered AS (
-        SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time::timestamptz, symbol) as trade_num
+        SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
         FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY}
       ),
       with_equity AS (
         SELECT *,
           ${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} *
-            SUM(pnl_pct) OVER (ORDER BY signal_time::timestamptz, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+            SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
           as equity,
           ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * pnl_pct as trade_pnl_usd,
-          SUM(pnl_pct) OVER (ORDER BY signal_time::timestamptz, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cum_pnl_raw
+          SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cum_pnl_raw
         FROM filtered
       )
       SELECT trade_num, symbol, signal_time, entry_price, exit_price,
@@ -129,14 +129,14 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
         ROUND(equity::numeric, 0) as equity
       FROM with_equity
-      ORDER BY signal_time::timestamptz DESC, symbol
+      ORDER BY signal_time DESC, symbol
       LIMIT ${PER_PAGE} OFFSET ${(simPage - 1) * PER_PAGE}
     `);
 
     const finalEq: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (
-          PARTITION BY signal_time::timestamptz::date ORDER BY signal_time::timestamptz ASC
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
         FROM scanner_short_ml_filtered
       ),
@@ -159,12 +159,12 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as n
+      SELECT COUNT(DISTINCT date_trunc('month', signal_time))::int as n
       FROM scanner_short_ml_filtered
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
-      SELECT date_trunc('month', signal_time::timestamptz) as month,
+      SELECT date_trunc('month', signal_time) as month,
         COUNT(*)::int as trades,
         COUNT(*) FILTER (WHERE pnl_pct > 0)::int as wins,
         COUNT(*) FILTER (WHERE pnl_pct <= 0)::int as losses,
@@ -213,7 +213,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
       SELECT symbol, signal_time, ml_prob, entry_price, exit_price,
         pnl_pct, exit_reason, bars_held
       FROM scanner_short_ml_filtered ${wh}
-      ORDER BY signal_time::timestamptz DESC
+      ORDER BY signal_time DESC
       LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
     `);
   } catch {}
