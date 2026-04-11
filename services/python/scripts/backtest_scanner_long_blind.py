@@ -32,6 +32,17 @@ VOL_MA_PERIOD = 20
 PRICE_LOOKBACK = 96       # 24h lookback for rolling low
 BTC_EMA_PERIOD = 30       # BTC trend filter
 
+# ── ML Feature columns ─────────────────────────────────────────────
+FEATURE_COLS = [
+    "vol_ratio", "price_move", "price_change_1bar", "price_change_4bar",
+    "bar_range_norm", "upper_wick_pct", "lower_wick_pct", "body_pct",
+    "vol_trend", "price_trend_4bar", "price_trend_24bar",
+    "volatility_20", "rsi_14",
+    "btc_ret_4bar", "btc_ret_24bar",
+    "hour_of_day", "day_of_week",
+    "bars_since_last_spike", "atr_14",
+]
+
 # ── Exit params ──────────────────────────────────────────────────────
 STOP_LOSS_PCT = 0.05
 TAKE_PROFIT_PCT = 0.15
@@ -119,6 +130,7 @@ def scan_coin(symbol, df, btc_times, btc_close, btc_ema):
     close = df["close"].values.astype(float)
     high = df["high"].values.astype(float)
     low = df["low"].values.astype(float)
+    open_arr = df["open"].values.astype(float)
     volume = df["volume"].values.astype(float)
     times = df["open_time"].values
 
@@ -147,11 +159,135 @@ def scan_coin(symbol, df, btc_times, btc_close, btc_ema):
         if btc_close[btc_idx] < btc_ema[btc_idx]:
             continue  # Skip if BTC is below EMA (bearish)
 
+        # ── Extract ML features at signal bar i ────────────────────
+        vol_ratio = volume[i] / vol_ma[i]
+        price_move = (close[i] - rolling_low) / rolling_low
+
+        # Price action
+        price_change_1bar = (
+            (close[i] - close[i - 1]) / close[i - 1] if close[i - 1] > 0 else 0
+        )
+        price_change_4bar = (
+            (close[i] - close[i - 4]) / close[i - 4]
+            if i >= 4 and close[i - 4] > 0
+            else 0
+        )
+
+        # Bar shape
+        bar_range = high[i] - low[i]
+        bar_range_norm = bar_range / close[i] if close[i] > 0 else 0
+        if bar_range > 0:
+            upper_wick_pct = (high[i] - max(open_arr[i], close[i])) / bar_range
+            lower_wick_pct = (min(open_arr[i], close[i]) - low[i]) / bar_range
+            body_pct = abs(close[i] - open_arr[i]) / bar_range
+        else:
+            upper_wick_pct = lower_wick_pct = body_pct = 0
+
+        # Volume trend: current vol_ma vs 4 bars ago
+        vol_trend = (
+            vol_ma[i] / vol_ma[i - 4] if i >= 4 and vol_ma[i - 4] > 0 else 1.0
+        )
+
+        # Price trend
+        price_trend_4bar = (
+            (close[i] - close[i - 4]) / close[i - 4]
+            if i >= 4 and close[i - 4] > 0
+            else 0
+        )
+        price_trend_24bar = (
+            (close[i] - close[i - 24]) / close[i - 24]
+            if i >= 24 and close[i - 24] > 0
+            else 0
+        )
+
+        # Volatility: 20-bar std of returns
+        if i >= 20:
+            rets = np.diff(close[i - 20 : i + 1]) / close[i - 20 : i]
+            volatility_20 = float(np.std(rets))
+        else:
+            volatility_20 = 0
+
+        # RSI 14
+        if i >= 14:
+            changes = np.diff(close[i - 14 : i + 1])
+            gains = (
+                np.mean(changes[changes > 0]) if np.any(changes > 0) else 0
+            )
+            losses_abs = (
+                np.mean(np.abs(changes[changes < 0]))
+                if np.any(changes < 0)
+                else 0
+            )
+            rsi_14 = (
+                100 - (100 / (1 + gains / losses_abs)) if losses_abs > 0 else 100
+            )
+        else:
+            rsi_14 = 50
+
+        # BTC returns
+        btc_ret_4bar = (
+            (btc_close[btc_idx] - btc_close[max(0, btc_idx - 4)])
+            / btc_close[max(0, btc_idx - 4)]
+            if btc_close[max(0, btc_idx - 4)] > 0
+            else 0
+        )
+        btc_ret_24bar = (
+            (btc_close[btc_idx] - btc_close[max(0, btc_idx - 24)])
+            / btc_close[max(0, btc_idx - 24)]
+            if btc_close[max(0, btc_idx - 24)] > 0
+            else 0
+        )
+
+        # Time features
+        ts = pd.Timestamp(times[i])
+        hour_of_day = ts.hour
+        day_of_week = ts.dayofweek
+
+        # Bars since last 2x volume spike (before current bar)
+        bars_since_last_spike = PRICE_LOOKBACK  # default if no spike found
+        for j in range(i - 1, max(i - PRICE_LOOKBACK, 0), -1):
+            if vol_ma[j] > 0 and volume[j] / vol_ma[j] >= 2.0:
+                bars_since_last_spike = i - j
+                break
+
+        # ATR 14 (normalized)
+        if i >= 14:
+            tr_arr = np.maximum(
+                high[i - 14 : i] - low[i - 14 : i],
+                np.abs(high[i - 14 : i] - close[i - 15 : i - 1]),
+                np.abs(low[i - 14 : i] - close[i - 15 : i - 1]),
+            )
+            atr_14 = (
+                float(np.mean(tr_arr) / close[i]) if close[i] > 0 else 0
+            )
+        else:
+            atr_14 = 0
+
         # Entry signal — simulate trade
         trade = simulate_trade(close, high, low, i)
         if trade:
             trade["symbol"] = symbol
             trade["signal_time"] = str(times[i])
+            # Attach ML features
+            trade["vol_ratio"] = vol_ratio
+            trade["price_move"] = price_move
+            trade["price_change_1bar"] = price_change_1bar
+            trade["price_change_4bar"] = price_change_4bar
+            trade["bar_range_norm"] = bar_range_norm
+            trade["upper_wick_pct"] = upper_wick_pct
+            trade["lower_wick_pct"] = lower_wick_pct
+            trade["body_pct"] = body_pct
+            trade["vol_trend"] = vol_trend
+            trade["price_trend_4bar"] = price_trend_4bar
+            trade["price_trend_24bar"] = price_trend_24bar
+            trade["volatility_20"] = volatility_20
+            trade["rsi_14"] = rsi_14
+            trade["btc_ret_4bar"] = btc_ret_4bar
+            trade["btc_ret_24bar"] = btc_ret_24bar
+            trade["hour_of_day"] = hour_of_day
+            trade["day_of_week"] = day_of_week
+            trade["bars_since_last_spike"] = bars_since_last_spike
+            trade["atr_14"] = atr_14
             trades.append(trade)
             cooldown_until = i + COOLDOWN_BARS
 
