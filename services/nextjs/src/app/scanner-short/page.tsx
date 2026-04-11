@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
 const PER_PAGE = 10;
+const V2_TABLE = "scanner_short_v2";
+const V2_WHERE = `WHERE variant = 'A'`;
+const V2_ML_TABLE = "scanner_short_v2_ml_filtered";
 
 interface Props {
   searchParams: Promise<{
@@ -22,7 +25,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   const exitReasonFilter = params.exitReason || "all";
   const symbolFilter = params.symbol || "";
 
-  // ── KPI: Raw blind stats ──
+  // ── KPI: v2 Raw + v2 ML stats ──
   type KpiStats = {
     trades: number; wr: number; pf: number; avgPnl: number;
     tpPct: number; slPct: number; avgBars: number;
@@ -31,7 +34,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   let rawStats = { ...emptyStats };
   let mlStats = { ...emptyStats };
 
-  const kpiSql = (table: string) => `
+  const kpiSqlV2 = `
     SELECT COUNT(*)::int as trades,
       ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
       ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
@@ -39,11 +42,22 @@ export default async function ScannerShortPage({ searchParams }: Props) {
       ROUND(COUNT(*) FILTER (WHERE exit_reason='take_profit')::numeric/GREATEST(COUNT(*),1)*100,1) as tp_pct,
       ROUND(COUNT(*) FILTER (WHERE exit_reason='stop_loss')::numeric/GREATEST(COUNT(*),1)*100,1) as sl_pct,
       ROUND(AVG(bars_held)::numeric, 0) as avg_bars
-    FROM ${table}
+    FROM ${V2_TABLE} ${V2_WHERE}
+  `;
+
+  const kpiSqlMl = `
+    SELECT COUNT(*)::int as trades,
+      ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
+      ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
+      ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='take_profit')::numeric/GREATEST(COUNT(*),1)*100,1) as tp_pct,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='stop_loss')::numeric/GREATEST(COUNT(*),1)*100,1) as sl_pct,
+      ROUND(AVG(bars_held)::numeric, 0) as avg_bars
+    FROM ${V2_ML_TABLE}
   `;
 
   try {
-    const r: any[] = await prisma.$queryRawUnsafe(kpiSql("scanner_short_blind"));
+    const r: any[] = await prisma.$queryRawUnsafe(kpiSqlV2);
     if (r[0]) rawStats = {
       trades: r[0].trades, wr: Number(r[0].wr) || 0, pf: Number(r[0].pf) || 0,
       avgPnl: Number(r[0].avg_pnl) || 0, tpPct: Number(r[0].tp_pct) || 0,
@@ -52,7 +66,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   } catch {}
 
   try {
-    const r: any[] = await prisma.$queryRawUnsafe(kpiSql("scanner_short_ml_filtered"));
+    const r: any[] = await prisma.$queryRawUnsafe(kpiSqlMl);
     if (r[0]) mlStats = {
       trades: r[0].trades, wr: Number(r[0].wr) || 0, pf: Number(r[0].pf) || 0,
       avgPnl: Number(r[0].avg_pnl) || 0, tpPct: Number(r[0].tp_pct) || 0,
@@ -60,7 +74,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     };
   } catch {}
 
-  // ── Realistic Simulation (ML-filtered): $600, 10% pos, max 3/day ──
+  // ── Realistic Simulation (v2 Raw variant A): $600, 10% pos, max 3/day ──
   const SIM_CAPITAL = 600;
   const SIM_POSITION_PCT = 0.10;
   const SIM_MAX_TRADES_DAY = 3;
@@ -73,7 +87,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM scanner_short_ml_filtered
+        FROM ${V2_TABLE} ${V2_WHERE}
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
     `);
     simTotal = simCountRows[0]?.n || 0;
@@ -83,7 +97,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM scanner_short_ml_filtered
+        FROM ${V2_TABLE} ${V2_WHERE}
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT COUNT(*)::int as trades,
@@ -108,7 +122,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM scanner_short_ml_filtered
+        FROM ${V2_TABLE} ${V2_WHERE}
       ),
       filtered AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
@@ -124,7 +138,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         FROM filtered
       )
       SELECT trade_num, symbol, signal_time, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held, ml_prob,
+        pnl_pct, exit_reason, bars_held,
         ROUND(trade_pnl_usd::numeric, 2) as trade_pnl_usd,
         ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
         ROUND(equity::numeric, 0) as equity
@@ -138,7 +152,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM scanner_short_ml_filtered
+        FROM ${V2_TABLE} ${V2_WHERE}
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
@@ -154,13 +168,13 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     }
   } catch {}
 
-  // ── Monthly Performance (ML-filtered, paginated) ──
+  // ── Monthly Performance (v2 Raw, paginated) ──
   let monthly: any[] = [];
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(DISTINCT date_trunc('month', signal_time))::int as n
-      FROM scanner_short_ml_filtered
+      FROM ${V2_TABLE} ${V2_WHERE}
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
@@ -171,18 +185,18 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_short_ml_filtered
+      FROM ${V2_TABLE} ${V2_WHERE}
       GROUP BY 1 ORDER BY 1 DESC
       LIMIT ${PER_PAGE} OFFSET ${(monthPage - 1) * PER_PAGE}
     `);
   } catch {}
 
-  // ── Top Coins (ML-filtered, paginated) ──
+  // ── Top Coins (v2 Raw, paginated) ──
   let topCoins: any[] = [];
   let coinsTotal = 0;
   try {
     const cc: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(DISTINCT symbol)::int as n FROM scanner_short_ml_filtered
+      SELECT COUNT(DISTINCT symbol)::int as n FROM ${V2_TABLE} ${V2_WHERE}
     `);
     coinsTotal = cc[0]?.n || 0;
     topCoins = await prisma.$queryRawUnsafe(`
@@ -191,28 +205,28 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_short_ml_filtered
+      FROM ${V2_TABLE} ${V2_WHERE}
       GROUP BY symbol ORDER BY SUM(pnl_pct) DESC
       LIMIT ${PER_PAGE} OFFSET ${(coinPage - 1) * PER_PAGE}
     `);
   } catch {}
 
-  // ── All ML-Filtered Trades (paginated, filterable) ──
+  // ── All v2 Trades (paginated, filterable) ──
   let trades: any[] = [];
   let totalTrades = 0;
   try {
-    let wh = "WHERE 1=1";
+    let wh = `${V2_WHERE}`;
     if (exitReasonFilter !== "all") wh += ` AND exit_reason = '${exitReasonFilter}'`;
     if (symbolFilter) wh += ` AND symbol ILIKE '%${symbolFilter.toUpperCase()}%'`;
 
     const cr: any[] = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int as n FROM scanner_short_ml_filtered ${wh}`
+      `SELECT COUNT(*)::int as n FROM ${V2_TABLE} ${wh}`
     );
     totalTrades = cr[0]?.n || 0;
     trades = await prisma.$queryRawUnsafe(`
-      SELECT symbol, signal_time, ml_prob, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held
-      FROM scanner_short_ml_filtered ${wh}
+      SELECT symbol, signal_time, entry_price, exit_price,
+        pnl_pct, exit_reason, bars_held, bounce_pct, rejection_speed
+      FROM ${V2_TABLE} ${wh}
       ORDER BY signal_time DESC
       LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
     `);
@@ -240,26 +254,26 @@ export default async function ScannerShortPage({ searchParams }: Props) {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">
-          Scanner Short{" "}
+          Scanner Short v2{" "}
           <span className="text-sm font-normal text-red-400">
-            Blind Backtest + ML Filter
+            Delayed Entry + Regime Filter
           </span>
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          SL=5% | TP=15% | R:R=3:1 | 197 coins | BTC bearish filter
+          Bounce rejection entry | 5% SL / 5% TP | BTC daily EMA + breadth filter | 197 coins
         </p>
       </div>
 
-      {/* KPI Comparison: Raw vs ML */}
+      {/* KPI Comparison: v2 Raw vs v2 + ML */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Raw Blind */}
+        {/* v2 Raw */}
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-              RAW
+              v2 RAW
             </span>
             <span className="text-sm font-semibold text-white">
-              Blind (All Signals)
+              Delayed Entry (Variant A)
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -270,11 +284,11 @@ export default async function ScannerShortPage({ searchParams }: Props) {
           </div>
         </div>
 
-        {/* ML-Filtered */}
+        {/* v2 + ML */}
         <div className="card p-4 border-l-4 border-red-500">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-bold text-red-400 bg-red-900/30 px-2 py-0.5 rounded">
-              ML @0.60
+              v2 + ML
             </span>
             <span className="text-sm font-semibold text-white">
               ML-Filtered
@@ -289,16 +303,16 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         </div>
       </div>
 
-      {/* Realistic Simulation (ML-filtered) */}
+      {/* Realistic Simulation (v2 Raw) */}
       <div className="card overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                Blind Simulation (ML-Filtered) — $600 Capital, 10% Position, Up to 3 Trades/Day
+                v2 Simulation (Raw) — $600 Capital, 10% Position, Up to 3 Trades/Day
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                No lookahead. First 3 signals per day by time. 10% position, fixed size. BTC bearish filter.
+                No lookahead. First 3 signals per day by time. 10% position, fixed size. BTC regime + breadth filter.
               </p>
             </div>
             <Pager current={simPage} total={simPages} paramKey="simPage" buildHref={pg} />
@@ -369,12 +383,12 @@ export default async function ScannerShortPage({ searchParams }: Props) {
 
       {/* Monthly + Top Coins side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Performance (ML-filtered) */}
+        {/* Monthly Performance (v2 Raw) */}
         <div className="card overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
-              <h2 className="text-sm font-semibold text-slate-200">Monthly Performance (ML)</h2>
-              <p className="text-[10px] text-slate-500">ML-filtered trades only</p>
+              <h2 className="text-sm font-semibold text-slate-200">Monthly Performance (v2 Raw)</h2>
+              <p className="text-[10px] text-slate-500">Variant A — delayed entry trades</p>
             </div>
             <Pager current={monthPage} total={monthPages} paramKey="monthPage" buildHref={pg} />
           </div>
@@ -412,12 +426,12 @@ export default async function ScannerShortPage({ searchParams }: Props) {
           </table>
         </div>
 
-        {/* Top Coins (ML-filtered) */}
+        {/* Top Coins (v2 Raw) */}
         <div className="card overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
-              <h2 className="text-sm font-semibold text-slate-200">Top Coins (ML)</h2>
-              <p className="text-[10px] text-slate-500">ML-filtered trades only</p>
+              <h2 className="text-sm font-semibold text-slate-200">Top Coins (v2 Raw)</h2>
+              <p className="text-[10px] text-slate-500">Variant A — delayed entry trades</p>
             </div>
             <Pager current={coinPage} total={coinPages} paramKey="coinPage" buildHref={pg} />
           </div>
@@ -488,11 +502,11 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         </form>
       </div>
 
-      {/* All ML-Filtered Trades */}
+      {/* All v2 Trades */}
       <div className="card overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
           <h2 className="text-sm font-semibold text-slate-200">
-            All ML-Filtered Trades ({totalTrades.toLocaleString()})
+            All v2 Trades ({totalTrades.toLocaleString()})
           </h2>
           <Pager current={page} total={tradePages} paramKey="page" buildHref={pg} />
         </div>
@@ -502,12 +516,13 @@ export default async function ScannerShortPage({ searchParams }: Props) {
               <tr className="border-b border-[var(--border)]">
                 <th className="px-3 py-2 text-left text-slate-500">Date</th>
                 <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
-                <th className="px-3 py-2 text-right text-slate-500">ML Prob</th>
                 <th className="px-3 py-2 text-right text-slate-500">Entry</th>
                 <th className="px-3 py-2 text-right text-slate-500">Exit</th>
                 <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
                 <th className="px-3 py-2 text-center text-slate-500">Exit Reason</th>
-                <th className="px-3 py-2 text-right text-slate-500">Bars Held</th>
+                <th className="px-3 py-2 text-right text-slate-500">Bars</th>
+                <th className="px-3 py-2 text-right text-slate-500">Bounce%</th>
+                <th className="px-3 py-2 text-right text-slate-500">Rej Speed</th>
               </tr>
             </thead>
             <tbody>
@@ -517,9 +532,6 @@ export default async function ScannerShortPage({ searchParams }: Props) {
                     {new Date(t.signal_time).toLocaleDateString("en-CA")}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-brand-400">
-                    {Number(t.ml_prob).toFixed(2)}
-                  </td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">
                     ${Number(t.entry_price).toPrecision(4)}
                   </td>
@@ -537,6 +549,12 @@ export default async function ScannerShortPage({ searchParams }: Props) {
                     }`}>{t.exit_reason}</span>
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">{t.bars_held}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                    {t.bounce_pct != null ? `${(Number(t.bounce_pct) * 100).toFixed(1)}%` : "-"}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                    {t.rejection_speed != null ? Number(t.rejection_speed).toFixed(2) : "-"}
+                  </td>
                 </tr>
               ))}
             </tbody>
