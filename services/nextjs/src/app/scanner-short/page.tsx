@@ -77,7 +77,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   // ── Realistic Simulation (v2 + ML): $600, 10% pos, max 3/day ──
   const SIM_CAPITAL = 600;
   const SIM_POSITION_PCT = 0.10;
-  const SIM_MAX_TRADES_DAY = 10;
+  const SIM_MAX_TRADES_DAY = 999; // no limit — 10% position sizing protects the portfolio
   const SIM_TABLE = V2_ML_TABLE;
   let simTrades: any[] = [];
   let simTotal = 0;
@@ -309,7 +309,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                v2 + ML Simulation — $600 Capital, 10% Position, Up to 10 Trades/Day
+                v2 + ML Simulation — $600 Capital, 10% Position, No Daily Limit
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
                 ML @0.70 filtered OOS trades. Bounce rejection + regime. 10% position, compounding.
