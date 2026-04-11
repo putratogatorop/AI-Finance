@@ -74,10 +74,11 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     };
   } catch {}
 
-  // ── Realistic Simulation (v2 Raw variant A): $600, 10% pos, max 3/day ──
+  // ── Realistic Simulation (v2 + ML): $600, 10% pos, max 3/day ──
   const SIM_CAPITAL = 600;
   const SIM_POSITION_PCT = 0.10;
   const SIM_MAX_TRADES_DAY = 3;
+  const SIM_TABLE = V2_ML_TABLE;
   let simTrades: any[] = [];
   let simTotal = 0;
   let simStats = { trades: 0, wins: 0, wr: 0, pf: 0, finalEquity: 0, totalReturn: 0, months: 0, monthlyAvg: 0 };
@@ -87,7 +88,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM ${V2_TABLE} ${V2_WHERE}
+        FROM ${SIM_TABLE}
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
     `);
     simTotal = simCountRows[0]?.n || 0;
@@ -97,7 +98,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM ${V2_TABLE} ${V2_WHERE}
+        FROM ${SIM_TABLE}
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT COUNT(*)::int as trades,
@@ -122,7 +123,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM ${V2_TABLE} ${V2_WHERE}
+        FROM ${SIM_TABLE}
       ),
       filtered AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
@@ -138,7 +139,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         FROM filtered
       )
       SELECT trade_num, symbol, signal_time, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held,
+        pnl_pct, exit_reason, bars_held, ml_prob,
         ROUND(trade_pnl_usd::numeric, 2) as trade_pnl_usd,
         ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
         ROUND(equity::numeric, 0) as equity
@@ -152,7 +153,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY signal_time::date ORDER BY signal_time ASC
         ) as rn
-        FROM ${V2_TABLE} ${V2_WHERE}
+        FROM ${SIM_TABLE}
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
@@ -168,13 +169,13 @@ export default async function ScannerShortPage({ searchParams }: Props) {
     }
   } catch {}
 
-  // ── Monthly Performance (v2 Raw, paginated) ──
+  // ── Monthly Performance (v2 + ML, paginated) ──
   let monthly: any[] = [];
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(DISTINCT date_trunc('month', signal_time))::int as n
-      FROM ${V2_TABLE} ${V2_WHERE}
+      FROM ${V2_ML_TABLE}
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
@@ -185,18 +186,18 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM ${V2_TABLE} ${V2_WHERE}
+      FROM ${V2_ML_TABLE}
       GROUP BY 1 ORDER BY 1 DESC
       LIMIT ${PER_PAGE} OFFSET ${(monthPage - 1) * PER_PAGE}
     `);
   } catch {}
 
-  // ── Top Coins (v2 Raw, paginated) ──
+  // ── Top Coins (v2 + ML, paginated) ──
   let topCoins: any[] = [];
   let coinsTotal = 0;
   try {
     const cc: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(DISTINCT symbol)::int as n FROM ${V2_TABLE} ${V2_WHERE}
+      SELECT COUNT(DISTINCT symbol)::int as n FROM ${V2_ML_TABLE}
     `);
     coinsTotal = cc[0]?.n || 0;
     topCoins = await prisma.$queryRawUnsafe(`
@@ -205,7 +206,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM ${V2_TABLE} ${V2_WHERE}
+      FROM ${V2_ML_TABLE}
       GROUP BY symbol ORDER BY SUM(pnl_pct) DESC
       LIMIT ${PER_PAGE} OFFSET ${(coinPage - 1) * PER_PAGE}
     `);
@@ -303,16 +304,16 @@ export default async function ScannerShortPage({ searchParams }: Props) {
         </div>
       </div>
 
-      {/* Realistic Simulation (v2 Raw) */}
+      {/* Realistic Simulation (v2 + ML) */}
       <div className="card overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                v2 Simulation (Raw) — $600 Capital, 10% Position, Up to 3 Trades/Day
+                v2 + ML Simulation — $600 Capital, 10% Position, Up to 3 Trades/Day
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                No lookahead. First 3 signals per day by time. 10% position, fixed size. BTC regime + breadth filter.
+                ML @0.70 filtered OOS trades. Bounce rejection + regime. 10% position, fixed size.
               </p>
             </div>
             <Pager current={simPage} total={simPages} paramKey="simPage" buildHref={pg} />
@@ -334,6 +335,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
                 <th className="px-3 py-2 text-center text-slate-500">#</th>
                 <th className="px-3 py-2 text-left text-slate-500">Date</th>
                 <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
+                <th className="px-3 py-2 text-right text-slate-500">ML</th>
                 <th className="px-3 py-2 text-right text-slate-500">Entry</th>
                 <th className="px-3 py-2 text-right text-slate-500">Exit</th>
                 <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
@@ -352,6 +354,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
                     {new Date(t.signal_time).toLocaleDateString("en-CA")}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-brand-400">{t.ml_prob ? Number(t.ml_prob).toFixed(2) : "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.entry_price).toPrecision(4)}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.exit_price).toPrecision(4)}</td>
                   <td className={`px-3 py-1.5 text-right font-mono font-bold ${Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"}`}>
