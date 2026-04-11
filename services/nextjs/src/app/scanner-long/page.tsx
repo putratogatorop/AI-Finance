@@ -83,7 +83,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     const simCountRows: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int as n FROM (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_backtest WHERE strategy = '${winner}'
+        FROM scanner_long_blind
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
     `);
     simTotal = simCountRows[0]?.n || 0;
@@ -92,7 +92,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     const simStatsRows: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_backtest WHERE strategy = '${winner}'
+        FROM scanner_long_blind
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT COUNT(*)::int as trades,
@@ -117,7 +117,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     simTrades = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_backtest WHERE strategy = '${winner}'
+        FROM scanner_long_blind
       ),
       filtered AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
@@ -146,7 +146,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     const finalEq: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_backtest WHERE strategy = '${winner}'
+        FROM scanner_long_blind
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
@@ -162,13 +162,13 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     }
   } catch {}
 
-  // Monthly performance for winning strategy (paginated)
+  // Monthly performance from BLIND backtest (paginated)
   let monthly: any[] = [];
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(DISTINCT date_trunc('month', signal_time::timestamptz))::int as n
-      FROM scanner_long_backtest WHERE strategy = '${winner}'
+      FROM scanner_long_blind
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
@@ -179,7 +179,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_long_backtest WHERE strategy = '${winner}'
+      FROM scanner_long_blind
       GROUP BY 1 ORDER BY 1 DESC
       LIMIT ${PER_PAGE} OFFSET ${(monthPage - 1) * PER_PAGE}
     `);
@@ -191,7 +191,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   try {
     const cc: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(DISTINCT symbol)::int as n
-      FROM scanner_long_backtest WHERE strategy = '${winner}'
+      FROM scanner_long_blind
     `);
     coinsTotal = cc[0]?.n || 0;
     topCoins = await prisma.$queryRawUnsafe(`
@@ -200,7 +200,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_long_backtest WHERE strategy = '${winner}'
+      FROM scanner_long_blind
       GROUP BY symbol ORDER BY SUM(pnl_pct) DESC
       LIMIT ${PER_PAGE} OFFSET ${(coinPage - 1) * PER_PAGE}
     `);
@@ -254,7 +254,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
           <span className="text-sm font-normal text-green-400">3-Strategy Backtest</span>
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          SL=5% | TP=15% | R:R=3:1 | 198 coins
+          SL=5% | TP=15% | R:R=3:1 | 198 coins | BTC trend filter
         </p>
       </div>
 
@@ -310,10 +310,10 @@ export default async function ScannerLongPage({ searchParams }: Props) {
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                Realistic Simulation — $600 Capital, 10% Position, Up to 3 Trades/Day
+                Blind Simulation — $600 Capital, 10% Position, Up to 3 Trades/Day
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                Strategy {winner} ({STRATEGY_LABELS[winner]}). Each trade risks 10% of portfolio. Compounding equity. Max 3 trades/day (best PnL first).
+                No lookahead. Vol+Momentum on ALL coins + BTC trend filter. 10% position, compounding. Max 3 trades/day (first signal).
               </p>
             </div>
             <Pager current={simPage} total={simPages} paramKey="simPage" buildHref={pg} />
@@ -479,10 +479,10 @@ export default async function ScannerLongPage({ searchParams }: Props) {
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                Monthly Performance
+                Monthly Performance (Blind)
               </h2>
               <p className="text-[10px] text-slate-500">
-                Strategy {winner} ({STRATEGY_LABELS[winner]})
+                Vol+Momentum on all coins, no lookahead
               </p>
             </div>
             <Pager
@@ -554,9 +554,9 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         <div className="card overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
-              <h2 className="text-sm font-semibold text-slate-200">Top Coins</h2>
+              <h2 className="text-sm font-semibold text-slate-200">Top Coins (Blind)</h2>
               <p className="text-[10px] text-slate-500">
-                Strategy {winner} ({STRATEGY_LABELS[winner]})
+                Vol+Momentum on all coins, no lookahead
               </p>
             </div>
             <Pager
