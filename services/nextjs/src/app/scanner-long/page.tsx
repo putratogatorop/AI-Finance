@@ -1,17 +1,13 @@
 import { prisma } from "@/lib/prisma";
 
 const PER_PAGE = 10;
-
-const STRATEGY_LABELS: Record<string, string> = {
-  A: "Vol+Momentum",
-  B: "PriceScan",
-  C: "VB Piggyback",
-};
+const V2_TABLE = "scanner_long_v2";
+const V2_WHERE = `WHERE variant = 'A'`;
+const V2_ML_TABLE = "scanner_long_v2_ml_filtered";
 
 interface Props {
   searchParams: Promise<{
     symbol?: string;
-    strategy?: string;
     exitReason?: string;
     page?: string;
     simPage?: string;
@@ -26,73 +22,83 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   const simPage = Math.max(1, parseInt(params.simPage || "1") || 1);
   const monthPage = Math.max(1, parseInt(params.monthPage || "1") || 1);
   const coinPage = Math.max(1, parseInt(params.coinPage || "1") || 1);
-  const strategyFilter = params.strategy || "all";
   const exitReasonFilter = params.exitReason || "all";
   const symbolFilter = params.symbol || "";
 
-  // Per-strategy KPI stats
-  type StrategyStats = {
+  // ── KPI: v2 Raw + v2 ML stats ──
+  type KpiStats = {
     trades: number; wr: number; pf: number; avgPnl: number;
     tpPct: number; slPct: number; avgBars: number;
   };
-  const strategyStats: Record<string, StrategyStats> = {
-    A: { trades: 0, wr: 0, pf: 0, avgPnl: 0, tpPct: 0, slPct: 0, avgBars: 0 },
-    B: { trades: 0, wr: 0, pf: 0, avgPnl: 0, tpPct: 0, slPct: 0, avgBars: 0 },
-    C: { trades: 0, wr: 0, pf: 0, avgPnl: 0, tpPct: 0, slPct: 0, avgBars: 0 },
-  };
+  const emptyStats: KpiStats = { trades: 0, wr: 0, pf: 0, avgPnl: 0, tpPct: 0, slPct: 0, avgBars: 0 };
+  let rawStats = { ...emptyStats };
+  let mlStats = { ...emptyStats };
 
-  for (const strat of ["A", "B", "C"]) {
-    try {
-      const r: any[] = await prisma.$queryRawUnsafe(`
-        SELECT COUNT(*)::int as trades,
-          ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
-          ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
-          ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl,
-          ROUND(COUNT(*) FILTER (WHERE exit_reason='take_profit')::numeric/GREATEST(COUNT(*),1)*100,1) as tp_pct,
-          ROUND(COUNT(*) FILTER (WHERE exit_reason='stop_loss')::numeric/GREATEST(COUNT(*),1)*100,1) as sl_pct,
-          ROUND(AVG(bars_held)::numeric, 0) as avg_bars
-        FROM scanner_long_backtest WHERE strategy = '${strat}'
-      `);
-      if (r[0]) {
-        strategyStats[strat] = {
-          trades: r[0].trades,
-          wr: Number(r[0].wr) || 0,
-          pf: Number(r[0].pf) || 0,
-          avgPnl: Number(r[0].avg_pnl) || 0,
-          tpPct: Number(r[0].tp_pct) || 0,
-          slPct: Number(r[0].sl_pct) || 0,
-          avgBars: Number(r[0].avg_bars) || 0,
-        };
-      }
-    } catch {}
-  }
+  const kpiSqlV2 = `
+    SELECT COUNT(*)::int as trades,
+      ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
+      ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
+      ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='take_profit')::numeric/GREATEST(COUNT(*),1)*100,1) as tp_pct,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='stop_loss')::numeric/GREATEST(COUNT(*),1)*100,1) as sl_pct,
+      ROUND(AVG(bars_held)::numeric, 0) as avg_bars
+    FROM ${V2_TABLE} ${V2_WHERE}
+  `;
 
-  // Determine winner (highest PF)
-  const winner = (["A", "B", "C"] as const).reduce((best, s) =>
-    strategyStats[s].pf > strategyStats[best].pf ? s : best, "A" as string);
+  const kpiSqlMl = `
+    SELECT COUNT(*)::int as trades,
+      ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
+      ROUND(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct>0),0)::numeric/ABS(NULLIF(SUM(pnl_pct) FILTER (WHERE pnl_pct<=0),0))::numeric,2) as pf,
+      ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='take_profit')::numeric/GREATEST(COUNT(*),1)*100,1) as tp_pct,
+      ROUND(COUNT(*) FILTER (WHERE exit_reason='stop_loss')::numeric/GREATEST(COUNT(*),1)*100,1) as sl_pct,
+      ROUND(AVG(bars_held)::numeric, 0) as avg_bars
+    FROM ${V2_ML_TABLE}
+  `;
 
-  // Realistic simulation: up to 3 trades/day, 10% position size, compounding
+  try {
+    const r: any[] = await prisma.$queryRawUnsafe(kpiSqlV2);
+    if (r[0]) rawStats = {
+      trades: r[0].trades, wr: Number(r[0].wr) || 0, pf: Number(r[0].pf) || 0,
+      avgPnl: Number(r[0].avg_pnl) || 0, tpPct: Number(r[0].tp_pct) || 0,
+      slPct: Number(r[0].sl_pct) || 0, avgBars: Number(r[0].avg_bars) || 0,
+    };
+  } catch {}
+
+  try {
+    const r: any[] = await prisma.$queryRawUnsafe(kpiSqlMl);
+    if (r[0]) mlStats = {
+      trades: r[0].trades, wr: Number(r[0].wr) || 0, pf: Number(r[0].pf) || 0,
+      avgPnl: Number(r[0].avg_pnl) || 0, tpPct: Number(r[0].tp_pct) || 0,
+      slPct: Number(r[0].sl_pct) || 0, avgBars: Number(r[0].avg_bars) || 0,
+    };
+  } catch {}
+
+  // ── Realistic Simulation (v2 + ML): $600, 10% pos, max 3/day ──
   const SIM_CAPITAL = 600;
-  const SIM_POSITION_PCT = 0.10; // 10% of portfolio per trade
-  const SIM_MAX_TRADES_DAY = 3;
+  const SIM_POSITION_PCT = 0.10;
+  const SIM_MAX_TRADES_DAY = 999; // no limit — 10% position sizing protects the portfolio
+  const SIM_TABLE = V2_ML_TABLE;
   let simTrades: any[] = [];
   let simTotal = 0;
   let simStats = { trades: 0, wins: 0, wr: 0, pf: 0, finalEquity: 0, totalReturn: 0, months: 0, monthlyAvg: 0 };
   try {
-    // Pick up to 3 trades per day from winning strategy, ordered by signal_time
     const simCountRows: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int as n FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_blind
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
+        ) as rn
+        FROM ${SIM_TABLE}
       ) t WHERE rn <= ${SIM_MAX_TRADES_DAY}
     `);
     simTotal = simCountRows[0]?.n || 0;
 
-    // Overall sim stats
     const simStatsRows: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_blind
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
+        ) as rn
+        FROM ${SIM_TABLE}
       ),
       filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
       SELECT COUNT(*)::int as trades,
@@ -112,63 +118,63 @@ export default async function ScannerLongPage({ searchParams }: Props) {
       simStats.months = s.months || 1;
     }
 
-    // Get paginated trades with running equity (compounding 10% position)
-    // Each trade's dollar PnL = equity * 0.10 * pnl_pct, new equity = old + dollar_pnl
-    simTrades = await prisma.$queryRawUnsafe(`
+    // Fetch all sim trades (for compounding calculation)
+    const allSimTrades: any[] = await prisma.$queryRawUnsafe(`
       WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_blind
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY signal_time::date ORDER BY signal_time ASC
+        ) as rn
+        FROM ${SIM_TABLE}
       ),
       filtered AS (
         SELECT *, ROW_NUMBER() OVER (ORDER BY signal_time, symbol) as trade_num
         FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY}
-      ),
-      with_equity AS (
-        SELECT *,
-          ${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} *
-            SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-          as equity,
-          ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * pnl_pct as trade_pnl_usd,
-          SUM(pnl_pct) OVER (ORDER BY signal_time, symbol ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cum_pnl_raw
-        FROM filtered
       )
       SELECT trade_num, symbol, signal_time, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held,
-        ROUND(trade_pnl_usd::numeric, 2) as trade_pnl_usd,
-        ROUND((cum_pnl_raw * ${SIM_POSITION_PCT} * 100)::numeric, 1) as cum_pnl_pct,
-        ROUND(equity::numeric, 0) as equity
-      FROM with_equity
-      ORDER BY signal_time DESC, symbol
-      LIMIT ${PER_PAGE} OFFSET ${(simPage - 1) * PER_PAGE}
+        pnl_pct, exit_reason, bars_held, ml_prob
+      FROM filtered
+      ORDER BY signal_time ASC, symbol
     `);
 
-    // Get final equity
-    const finalEq: any[] = await prisma.$queryRawUnsafe(`
-      WITH daily AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY signal_time::date ORDER BY signal_time ASC) as rn
-        FROM scanner_long_blind
-      ),
-      filtered AS (SELECT * FROM daily WHERE rn <= ${SIM_MAX_TRADES_DAY})
-      SELECT ROUND((${SIM_CAPITAL} + ${SIM_CAPITAL} * ${SIM_POSITION_PCT} * SUM(pnl_pct))::numeric, 0) as final_eq,
-        ROUND((${SIM_POSITION_PCT} * SUM(pnl_pct) * 100)::numeric, 1) as total_return
-      FROM filtered
-    `);
-    if (finalEq[0]) {
-      simStats.finalEquity = Number(finalEq[0].final_eq) || SIM_CAPITAL;
-      simStats.totalReturn = Number(finalEq[0].total_return) || 0;
-      simStats.monthlyAvg = simStats.months > 0
-        ? Math.round(simStats.totalReturn / simStats.months * 10) / 10
-        : 0;
-    }
+    // Compute compounding equity in JS (SQL can't do this properly)
+    let equity = SIM_CAPITAL;
+    const enriched = allSimTrades.map((t: any) => {
+      const pnl = Number(t.pnl_pct);
+      const posSize = equity * SIM_POSITION_PCT;
+      const tradePnlUsd = posSize * pnl;
+      equity += tradePnlUsd;
+      return {
+        ...t,
+        trade_pnl_usd: Math.round(tradePnlUsd * 100) / 100,
+        equity: Math.round(equity),
+        cum_return_pct: Math.round((equity / SIM_CAPITAL - 1) * 1000) / 10,
+      };
+    });
+
+    simStats.finalEquity = Math.round(equity);
+    simStats.totalReturn = Math.round((equity / SIM_CAPITAL - 1) * 1000) / 10;
+    simStats.monthlyAvg = simStats.months > 0
+      ? Math.round(simStats.totalReturn / simStats.months * 10) / 10
+      : 0;
+
+    // Paginate (reverse for display — newest first)
+    const reversed = [...enriched].reverse();
+    const start = (simPage - 1) * PER_PAGE;
+    simTrades = reversed.slice(start, start + PER_PAGE).map((t: any) => ({
+      ...t,
+      trade_pnl_usd: t.trade_pnl_usd,
+      cum_pnl_pct: t.cum_return_pct,
+      equity: t.equity,
+    }));
   } catch {}
 
-  // Monthly performance from BLIND backtest (paginated)
+  // ── Monthly Performance (v2 + ML, paginated) ──
   let monthly: any[] = [];
   let monthlyTotal = 0;
   try {
     const mc: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(DISTINCT date_trunc('month', signal_time))::int as n
-      FROM scanner_long_blind
+      FROM ${V2_ML_TABLE}
     `);
     monthlyTotal = mc[0]?.n || 0;
     monthly = await prisma.$queryRawUnsafe(`
@@ -179,19 +185,18 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_long_blind
+      FROM ${V2_ML_TABLE}
       GROUP BY 1 ORDER BY 1 DESC
       LIMIT ${PER_PAGE} OFFSET ${(monthPage - 1) * PER_PAGE}
     `);
   } catch {}
 
-  // Top coins for winning strategy (paginated)
+  // ── Top Coins (v2 + ML, paginated) ──
   let topCoins: any[] = [];
   let coinsTotal = 0;
   try {
     const cc: any[] = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(DISTINCT symbol)::int as n
-      FROM scanner_long_blind
+      SELECT COUNT(DISTINCT symbol)::int as n FROM ${V2_ML_TABLE}
     `);
     coinsTotal = cc[0]?.n || 0;
     topCoins = await prisma.$queryRawUnsafe(`
@@ -200,30 +205,30 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         ROUND(COUNT(*) FILTER (WHERE pnl_pct > 0)::numeric/GREATEST(COUNT(*),1)*100,1) as wr,
         ROUND(SUM(pnl_pct)::numeric*100,1) as total_pnl,
         ROUND(AVG(pnl_pct)::numeric*100,2) as avg_pnl
-      FROM scanner_long_blind
+      FROM ${V2_ML_TABLE}
       GROUP BY symbol ORDER BY SUM(pnl_pct) DESC
       LIMIT ${PER_PAGE} OFFSET ${(coinPage - 1) * PER_PAGE}
     `);
   } catch {}
 
-  // All trades (paginated, filtered)
+  // ── All v2 Trades (paginated, filterable) ──
   let trades: any[] = [];
   let totalTrades = 0;
   try {
-    let wh = "WHERE 1=1";
-    if (strategyFilter !== "all") wh += ` AND strategy = '${strategyFilter}'`;
+    let wh = `${V2_WHERE}`;
     if (exitReasonFilter !== "all") wh += ` AND exit_reason = '${exitReasonFilter}'`;
     if (symbolFilter) wh += ` AND symbol ILIKE '%${symbolFilter.toUpperCase()}%'`;
 
     const cr: any[] = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int as n FROM scanner_long_backtest ${wh}`
+      `SELECT COUNT(*)::int as n FROM ${V2_TABLE} ${wh}`
     );
     totalTrades = cr[0]?.n || 0;
     trades = await prisma.$queryRawUnsafe(`
-      SELECT symbol, strategy, signal_time, entry_price, exit_price,
-        pnl_pct, exit_reason, bars_held
-      FROM scanner_long_backtest ${wh}
-      ORDER BY signal_time DESC LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
+      SELECT symbol, signal_time, entry_price, exit_price,
+        pnl_pct, exit_reason, bars_held, pullback_pct, reclaim_speed
+      FROM ${V2_TABLE} ${wh}
+      ORDER BY signal_time DESC
+      LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
     `);
   } catch {}
 
@@ -238,7 +243,6 @@ export default async function ScannerLongPage({ searchParams }: Props) {
     if (key !== "simPage") p.set("simPage", String(simPage));
     if (key !== "monthPage") p.set("monthPage", String(monthPage));
     if (key !== "coinPage") p.set("coinPage", String(coinPage));
-    if (strategyFilter !== "all") p.set("strategy", strategyFilter);
     if (exitReasonFilter !== "all") p.set("exitReason", exitReasonFilter);
     if (symbolFilter) p.set("symbol", symbolFilter);
     p.set(key, String(val));
@@ -250,70 +254,65 @@ export default async function ScannerLongPage({ searchParams }: Props) {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">
-          Scanner Long{" "}
-          <span className="text-sm font-normal text-green-400">3-Strategy Backtest</span>
+          Scanner Long v2{" "}
+          <span className="text-sm font-normal text-green-400">
+            Delayed Entry + Bullish Regime Filter
+          </span>
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          SL=5% | TP=15% | R:R=3:1 | 198 coins | BTC trend filter
+          Pullback reclaim entry | 5% SL / 5% TP | BTC &gt; 20d EMA + breadth &gt; 40% | 197 coins | ML &gt;= 0.80
         </p>
       </div>
 
-      {/* KPI Cards — 3 columns, one per strategy */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {(["A", "B", "C"] as const).map((s) => {
-          const st = strategyStats[s];
-          const isWinner = s === winner;
-          return (
-            <div
-              key={s}
-              className={`card p-4 ${isWinner ? "border-l-4 border-green-500" : ""}`}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                  {s}
-                </span>
-                <span className="text-sm font-semibold text-white">
-                  {STRATEGY_LABELS[s]}
-                </span>
-                {isWinner && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 ml-auto">
-                    WINNER
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <MiniKPI label="Trades" value={st.trades.toLocaleString()} />
-                <MiniKPI
-                  label="Win Rate"
-                  value={`${st.wr}%`}
-                  color={st.wr > 50 ? "green" : "red"}
-                />
-                <MiniKPI
-                  label="Profit Factor"
-                  value={st.pf.toFixed(2)}
-                  color={st.pf > 1 ? "green" : "red"}
-                />
-                <MiniKPI
-                  label="Avg PnL"
-                  value={`${st.avgPnl > 0 ? "+" : ""}${st.avgPnl}%`}
-                  color={st.avgPnl > 0 ? "green" : "red"}
-                />
-              </div>
-            </div>
-          );
-        })}
+      {/* KPI Comparison: v2 Raw vs v2 + ML */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* v2 Raw */}
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+              v2 RAW
+            </span>
+            <span className="text-sm font-semibold text-white">
+              Delayed Entry (Variant A)
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <MiniKPI label="Trades" value={rawStats.trades.toLocaleString()} />
+            <MiniKPI label="Win Rate" value={`${rawStats.wr}%`} color={rawStats.wr > 50 ? "green" : "red"} />
+            <MiniKPI label="Profit Factor" value={rawStats.pf.toFixed(2)} color={rawStats.pf > 1 ? "green" : "red"} />
+            <MiniKPI label="Avg PnL" value={`${rawStats.avgPnl > 0 ? "+" : ""}${rawStats.avgPnl}%`} color={rawStats.avgPnl > 0 ? "green" : "red"} />
+          </div>
+        </div>
+
+        {/* v2 + ML */}
+        <div className="card p-4 border-l-4 border-green-500">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs font-bold text-green-400 bg-green-900/30 px-2 py-0.5 rounded">
+              v2 + ML
+            </span>
+            <span className="text-sm font-semibold text-white">
+              ML-Filtered
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <MiniKPI label="Trades" value={mlStats.trades.toLocaleString()} />
+            <MiniKPI label="Win Rate" value={`${mlStats.wr}%`} color={mlStats.wr > 50 ? "green" : "red"} />
+            <MiniKPI label="Profit Factor" value={mlStats.pf.toFixed(2)} color={mlStats.pf > 1 ? "green" : "red"} />
+            <MiniKPI label="Avg PnL" value={`${mlStats.avgPnl > 0 ? "+" : ""}${mlStats.avgPnl}%`} color={mlStats.avgPnl > 0 ? "green" : "red"} />
+          </div>
+        </div>
       </div>
 
-      {/* Realistic Simulation */}
+      {/* Realistic Simulation (v2 + ML) */}
       <div className="card overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">
-                Blind Simulation — $600 Capital, 10% Position, Up to 3 Trades/Day
+                v2 + ML Simulation — $600 Capital, 10% Position, No Daily Limit
               </h2>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                No lookahead. Vol+Momentum on ALL coins + BTC trend filter. 10% position, compounding. Max 3 trades/day (first signal).
+                ML @0.80 filtered OOS trades. Pullback reclaim + bullish regime. 10% position, compounding.
               </p>
             </div>
             <Pager current={simPage} total={simPages} paramKey="simPage" buildHref={pg} />
@@ -335,6 +334,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
                 <th className="px-3 py-2 text-center text-slate-500">#</th>
                 <th className="px-3 py-2 text-left text-slate-500">Date</th>
                 <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
+                <th className="px-3 py-2 text-right text-slate-500">ML</th>
                 <th className="px-3 py-2 text-right text-slate-500">Entry</th>
                 <th className="px-3 py-2 text-right text-slate-500">Exit</th>
                 <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
@@ -353,6 +353,7 @@ export default async function ScannerLongPage({ searchParams }: Props) {
                     {new Date(t.signal_time).toLocaleDateString("en-CA")}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-brand-400">{t.ml_prob ? Number(t.ml_prob).toFixed(2) : "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.entry_price).toPrecision(4)}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.exit_price).toPrecision(4)}</td>
                   <td className={`px-3 py-1.5 text-right font-mono font-bold ${Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"}`}>
@@ -382,115 +383,16 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         </div>
       </div>
 
-      {/* Strategy Comparison Table */}
-      <div className="card overflow-hidden p-0">
-        <div className="px-4 py-3 border-b border-[var(--border)]">
-          <h2 className="text-sm font-semibold text-slate-200">Strategy Comparison</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-[var(--border)]">
-                <th className="px-3 py-2 text-left text-slate-500">Strategy</th>
-                <th className="px-3 py-2 text-right text-slate-500">Trades</th>
-                <th className="px-3 py-2 text-right text-slate-500">WR%</th>
-                <th className="px-3 py-2 text-right text-slate-500">PF</th>
-                <th className="px-3 py-2 text-right text-slate-500">Avg PnL</th>
-                <th className="px-3 py-2 text-right text-slate-500">TP%</th>
-                <th className="px-3 py-2 text-right text-slate-500">SL%</th>
-                <th className="px-3 py-2 text-right text-slate-500">Timeout%</th>
-                <th className="px-3 py-2 text-right text-slate-500">Avg Bars</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(["A", "B", "C"] as const).map((s) => {
-                const st = strategyStats[s];
-                const isWinner = s === winner;
-                const timeoutPct = Math.max(
-                  0,
-                  Math.round((100 - st.tpPct - st.slPct) * 10) / 10
-                );
-                return (
-                  <tr
-                    key={s}
-                    className={`border-b border-[var(--border)] hover:bg-slate-800/50 ${
-                      isWinner ? "bg-green-950/20" : ""
-                    }`}
-                  >
-                    <td className="px-3 py-1.5">
-                      <span className="text-white font-medium">
-                        {s}: {STRATEGY_LABELS[s]}
-                      </span>
-                      {isWinner && (
-                        <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-green-900/50 text-green-400">
-                          BEST
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
-                      {st.trades}
-                    </td>
-                    <td
-                      className={`px-3 py-1.5 text-right font-mono ${
-                        st.wr >= 50 ? "text-green-400" : "text-red-400"
-                      }`}
-                    >
-                      {st.wr}%
-                    </td>
-                    <td
-                      className={`px-3 py-1.5 text-right font-mono font-bold ${
-                        st.pf >= 1 ? "text-green-400" : "text-red-400"
-                      }`}
-                    >
-                      {st.pf.toFixed(2)}
-                    </td>
-                    <td
-                      className={`px-3 py-1.5 text-right font-mono ${
-                        st.avgPnl >= 0 ? "text-green-400" : "text-red-400"
-                      }`}
-                    >
-                      {st.avgPnl > 0 ? "+" : ""}
-                      {st.avgPnl}%
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-green-400">
-                      {st.tpPct}%
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-red-400">
-                      {st.slPct}%
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-400">
-                      {timeoutPct}%
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
-                      {st.avgBars}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* Monthly + Top Coins side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Performance */}
+        {/* Monthly Performance (v2 Raw) */}
         <div className="card overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
-              <h2 className="text-sm font-semibold text-slate-200">
-                Monthly Performance (Blind)
-              </h2>
-              <p className="text-[10px] text-slate-500">
-                Vol+Momentum on all coins, no lookahead
-              </p>
+              <h2 className="text-sm font-semibold text-slate-200">Monthly Performance (v2 Raw)</h2>
+              <p className="text-[10px] text-slate-500">Variant A — delayed entry trades</p>
             </div>
-            <Pager
-              current={monthPage}
-              total={monthPages}
-              paramKey="monthPage"
-              buildHref={pg}
-            />
+            <Pager current={monthPage} total={monthPages} paramKey="monthPage" buildHref={pg} />
           </div>
           <table className="w-full text-xs">
             <thead>
@@ -505,44 +407,20 @@ export default async function ScannerLongPage({ searchParams }: Props) {
             </thead>
             <tbody>
               {monthly.map((r: any, i: number) => (
-                <tr
-                  key={i}
-                  className="border-b border-[var(--border)] hover:bg-slate-800/50"
-                >
+                <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-300 font-mono">
-                    {new Date(r.month).toLocaleDateString("en-CA", {
-                      year: "numeric",
-                      month: "short",
-                    })}
+                    {new Date(r.month).toLocaleDateString("en-CA", { year: "numeric", month: "short" })}
                   </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
-                    {r.trades}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
-                    {r.wins}/{r.losses}
-                  </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.wr) >= 50 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">{r.trades}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">{r.wins}/{r.losses}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.wr) >= 50 ? "text-green-400" : "text-red-400"}`}>
                     {Number(r.wr)}%
                   </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.total_pnl) >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {Number(r.total_pnl) > 0 ? "+" : ""}
-                    {Number(r.total_pnl)}%
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.total_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(r.total_pnl) > 0 ? "+" : ""}{Number(r.total_pnl)}%
                   </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.avg_pnl) >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {Number(r.avg_pnl) > 0 ? "+" : ""}
-                    {Number(r.avg_pnl)}%
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.avg_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(r.avg_pnl) > 0 ? "+" : ""}{Number(r.avg_pnl)}%
                   </td>
                 </tr>
               ))}
@@ -550,21 +428,14 @@ export default async function ScannerLongPage({ searchParams }: Props) {
           </table>
         </div>
 
-        {/* Top Coins */}
+        {/* Top Coins (v2 Raw) */}
         <div className="card overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
             <div>
-              <h2 className="text-sm font-semibold text-slate-200">Top Coins (Blind)</h2>
-              <p className="text-[10px] text-slate-500">
-                Vol+Momentum on all coins, no lookahead
-              </p>
+              <h2 className="text-sm font-semibold text-slate-200">Top Coins (v2 Raw)</h2>
+              <p className="text-[10px] text-slate-500">Variant A — delayed entry trades</p>
             </div>
-            <Pager
-              current={coinPage}
-              total={coinPages}
-              paramKey="coinPage"
-              buildHref={pg}
-            />
+            <Pager current={coinPage} total={coinPages} paramKey="coinPage" buildHref={pg} />
           </div>
           <table className="w-full text-xs">
             <thead>
@@ -579,41 +450,18 @@ export default async function ScannerLongPage({ searchParams }: Props) {
             </thead>
             <tbody>
               {topCoins.map((r: any, i: number) => (
-                <tr
-                  key={i}
-                  className="border-b border-[var(--border)] hover:bg-slate-800/50"
-                >
-                  <td className="px-3 py-1.5 text-white font-medium">
-                    {r.symbol.replace("USDT", "")}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
-                    {r.trades}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-green-400">
-                    {r.wins}
-                  </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.wr) >= 50 ? "text-green-400" : "text-slate-300"
-                    }`}
-                  >
+                <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
+                  <td className="px-3 py-1.5 text-white font-medium">{r.symbol.replace("USDT", "")}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">{r.trades}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-green-400">{r.wins}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.wr) >= 50 ? "text-green-400" : "text-slate-300"}`}>
                     {Number(r.wr)}%
                   </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.total_pnl) >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {Number(r.total_pnl) > 0 ? "+" : ""}
-                    {Number(r.total_pnl)}%
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.total_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(r.total_pnl) > 0 ? "+" : ""}{Number(r.total_pnl)}%
                   </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono ${
-                      Number(r.avg_pnl) >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {Number(r.avg_pnl) > 0 ? "+" : ""}
-                    {Number(r.avg_pnl)}%
+                  <td className={`px-3 py-1.5 text-right font-mono ${Number(r.avg_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(r.avg_pnl) > 0 ? "+" : ""}{Number(r.avg_pnl)}%
                   </td>
                 </tr>
               ))}
@@ -633,19 +481,6 @@ export default async function ScannerLongPage({ searchParams }: Props) {
               placeholder="e.g. ENJ"
               className="bg-slate-800 border border-[var(--border)] rounded px-3 py-1.5 text-sm text-white w-28"
             />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Strategy</label>
-            <select
-              name="strategy"
-              defaultValue={strategyFilter}
-              className="bg-slate-800 border border-[var(--border)] rounded px-3 py-1.5 text-sm text-white"
-            >
-              <option value="all">All</option>
-              <option value="A">A: Vol+Momentum</option>
-              <option value="B">B: PriceScan</option>
-              <option value="C">C: VB Piggyback</option>
-            </select>
           </div>
           <div>
             <label className="text-xs text-slate-500 block mb-1">Exit Reason</label>
@@ -669,11 +504,11 @@ export default async function ScannerLongPage({ searchParams }: Props) {
         </form>
       </div>
 
-      {/* All Trades */}
+      {/* All v2 Trades */}
       <div className="card overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
           <h2 className="text-sm font-semibold text-slate-200">
-            All Trades ({totalTrades.toLocaleString()})
+            All v2 Trades ({totalTrades.toLocaleString()})
           </h2>
           <Pager current={page} total={tradePages} paramKey="page" buildHref={pg} />
         </div>
@@ -683,60 +518,44 @@ export default async function ScannerLongPage({ searchParams }: Props) {
               <tr className="border-b border-[var(--border)]">
                 <th className="px-3 py-2 text-left text-slate-500">Date</th>
                 <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
-                <th className="px-3 py-2 text-center text-slate-500">Strategy</th>
                 <th className="px-3 py-2 text-right text-slate-500">Entry</th>
                 <th className="px-3 py-2 text-right text-slate-500">Exit</th>
                 <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
                 <th className="px-3 py-2 text-center text-slate-500">Exit Reason</th>
-                <th className="px-3 py-2 text-right text-slate-500">Bars Held</th>
+                <th className="px-3 py-2 text-right text-slate-500">Bars</th>
+                <th className="px-3 py-2 text-right text-slate-500">Pullback%</th>
+                <th className="px-3 py-2 text-right text-slate-500">Reclaim Speed</th>
               </tr>
             </thead>
             <tbody>
               {trades.map((t: any, i: number) => (
-                <tr
-                  key={i}
-                  className="border-b border-[var(--border)] hover:bg-slate-800/50"
-                >
+                <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
                     {new Date(t.signal_time).toLocaleDateString("en-CA")}
                   </td>
-                  <td className="px-3 py-1.5 text-white font-medium">
-                    {t.symbol.replace("USDT", "")}
-                  </td>
-                  <td className="px-3 py-1.5 text-center">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
-                      {t.strategy}: {STRATEGY_LABELS[t.strategy] || t.strategy}
-                    </span>
-                  </td>
+                  <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">
                     ${Number(t.entry_price).toPrecision(4)}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-300">
                     ${Number(t.exit_price).toPrecision(4)}
                   </td>
-                  <td
-                    className={`px-3 py-1.5 text-right font-mono font-bold ${
-                      Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {Number(t.pnl_pct) > 0 ? "+" : ""}
-                    {(Number(t.pnl_pct) * 100).toFixed(1)}%
+                  <td className={`px-3 py-1.5 text-right font-mono font-bold ${Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"}`}>
+                    {Number(t.pnl_pct) > 0 ? "+" : ""}{(Number(t.pnl_pct) * 100).toFixed(1)}%
                   </td>
                   <td className="px-3 py-1.5 text-center">
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        t.exit_reason === "take_profit"
-                          ? "bg-green-900/50 text-green-400"
-                          : t.exit_reason === "stop_loss"
-                          ? "bg-red-900/50 text-red-400"
-                          : "bg-slate-700 text-slate-400"
-                      }`}
-                    >
-                      {t.exit_reason}
-                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      t.exit_reason === "take_profit" ? "bg-green-900/50 text-green-400" :
+                      t.exit_reason === "stop_loss" ? "bg-red-900/50 text-red-400" :
+                      "bg-slate-700 text-slate-400"
+                    }`}>{t.exit_reason}</span>
                   </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">
-                    {t.bars_held}
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">{t.bars_held}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                    {t.pullback_pct != null ? `${(Number(t.pullback_pct) * 100).toFixed(1)}%` : "-"}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                    {t.reclaim_speed != null ? Number(t.reclaim_speed).toFixed(2) : "-"}
                   </td>
                 </tr>
               ))}
@@ -748,21 +567,8 @@ export default async function ScannerLongPage({ searchParams }: Props) {
   );
 }
 
-function MiniKPI({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-}) {
-  const c =
-    color === "green"
-      ? "text-green-400"
-      : color === "red"
-      ? "text-red-400"
-      : "text-white";
+function MiniKPI({ label, value, color }: { label: string; value: string; color?: string }) {
+  const c = color === "green" ? "text-green-400" : color === "red" ? "text-red-400" : "text-white";
   return (
     <div>
       <p className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</p>
@@ -771,37 +577,18 @@ function MiniKPI({
   );
 }
 
-function Pager({
-  current,
-  total,
-  paramKey,
-  buildHref,
-}: {
-  current: number;
-  total: number;
-  paramKey: string;
+function Pager({ current, total, paramKey, buildHref }: {
+  current: number; total: number; paramKey: string;
   buildHref: (key: string, val: number) => string;
 }) {
   return (
     <div className="flex items-center gap-2 text-xs">
       {current > 1 && (
-        <a
-          href={buildHref(paramKey, current - 1)}
-          className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
-        >
-          Prev
-        </a>
+        <a href={buildHref(paramKey, current - 1)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Prev</a>
       )}
-      <span className="text-slate-500">
-        {current}/{total}
-      </span>
+      <span className="text-slate-500">{current}/{total}</span>
       {current < total && (
-        <a
-          href={buildHref(paramKey, current + 1)}
-          className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
-        >
-          Next
-        </a>
+        <a href={buildHref(paramKey, current + 1)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Next</a>
       )}
     </div>
   );
