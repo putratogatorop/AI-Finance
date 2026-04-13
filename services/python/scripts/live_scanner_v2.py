@@ -47,7 +47,7 @@ ML_THRESHOLD = 0.70
 SCAN_INTERVAL = 60
 CANDLE_INTERVAL = 900        # 15 min in seconds
 CANDLE_INTERVAL_STR = "15m"
-HISTORY_BARS = 200
+HISTORY_BARS = 2100  # ~22 days — enough for 20-day EMA regime filter
 MIN_VOLUME_USD = 500_000
 REGIME_CACHE_SECONDS = 3600  # Recompute regime once per hour
 
@@ -138,38 +138,40 @@ def fetch_all_tickers() -> dict[str, dict]:
     return tickers
 
 
+_db_engine = None
+
+
+def get_db_engine():
+    global _db_engine
+    if _db_engine is None:
+        _db_engine = create_engine(DB_URL)
+    return _db_engine
+
+
 def fetch_candles(
     pair: str, interval: str = CANDLE_INTERVAL_STR, limit: int = HISTORY_BARS
 ) -> pd.DataFrame | None:
-    """Fetch 15min candles for one pair from Gate.io."""
-    url = (
-        f"{GATEIO_BASE}/spot/candlesticks"
-        f"?currency_pair={pair}&interval={interval}&limit={limit}"
-    )
-    data = fetch_json(url)
-    if not data or len(data) < 10:
+    """Load 15min candles from DB (source of truth). pair e.g. 'BTC_USDT' -> asset 'BTCUSDT'."""
+    asset = pair.replace("_", "")
+    eng = get_db_engine()
+    with eng.connect() as conn:
+        result = conn.execute(text("""
+            SELECT timestamp, open, high, low, close, volume
+            FROM asset_prices_15m WHERE asset = :a
+            ORDER BY timestamp DESC LIMIT :lim
+        """), {"a": asset, "lim": limit}).fetchall()
+    if not result or len(result) < 10:
         return None
+    df = pd.DataFrame(result, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    return df.sort_values("timestamp").reset_index(drop=True)
 
-    rows = []
-    for c in data:
-        # Gate.io format: [timestamp, volume, close, high, low, open, is_window_closed]
-        try:
-            rows.append({
-                "timestamp": datetime.fromtimestamp(int(c[0]), tz=timezone.utc),
-                "volume": float(c[1]),
-                "close": float(c[2]),
-                "high": float(c[3]),
-                "low": float(c[4]),
-                "open": float(c[5]),
-            })
-        except (ValueError, IndexError):
-            continue
 
-    if not rows:
-        return None
-
-    df = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
-    return df
+def list_db_assets() -> list[str]:
+    """List all assets in DB (USDT-suffixed)."""
+    eng = get_db_engine()
+    with eng.connect() as conn:
+        result = conn.execute(text("SELECT DISTINCT asset FROM asset_prices_15m")).fetchall()
+    return [r[0] for r in result]
 
 
 # ── Regime computation ──────────────────────────────────────────────
