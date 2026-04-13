@@ -22,6 +22,10 @@ data/raw/15m/
 data/raw/fundamentals/
 data/raw/index/
 data/analysis/
+data/features/
+data/*.zip
+data/*.parquet
+data/*.npz
 
 # ML model weights (saved checkpoints, not source code)
 /models/
