@@ -87,9 +87,26 @@ export interface MonthlyBreakdown {
   win_rate: number;
 }
 
+export interface WeeklyBreakdown {
+  week: string;        // e.g. "2024-W03"
+  return_idr: number;
+  return_pct: number;
+  trades: number;
+  win_rate: number;
+}
+
+export interface PeriodBreakdown {
+  label: string;       // "2024-01" or "2024-W03"
+  return_idr: number;
+  return_pct: number;
+  trades: number;
+  win_rate: number;
+}
+
 export interface BacktestResult {
   metrics: BacktestMetrics;
   monthly: MonthlyBreakdown[];
+  weekly: WeeklyBreakdown[];
   equity_curve: { date: string; value: number }[];
 }
 

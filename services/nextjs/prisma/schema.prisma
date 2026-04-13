@@ -99,3 +99,105 @@ model AuditLog {
   @@index([event_type])
   @@map("audit_log")
 }
+
+model ScannerSignal {
+  id           Int      @id @default(autoincrement())
+  symbol       String   @db.VarChar(20)
+  direction    Int      // 1=LONG, -1=SHORT
+  ml_prob      Float    @map("ml_prob")
+  vol_ratio    Float    @map("vol_ratio")
+  price_change Float    @map("price_change")
+  signal_time  DateTime @db.Timestamptz() @map("signal_time")
+  status       String   @db.VarChar(20) @default("active") // active, traded, expired
+  pnl_pct      Float?   @map("pnl_pct")
+  exit_reason  String?  @db.VarChar(20) @map("exit_reason")
+  created_at   DateTime @default(now()) @db.Timestamptz() @map("created_at")
+
+  @@index([symbol])
+  @@index([signal_time])
+  @@index([status])
+  @@map("scanner_signals")
+}
+
+model AssetPrice15m {
+  id              Int      @id @default(autoincrement())
+  asset           String   @db.VarChar(20)
+  timestamp       DateTime @db.Timestamptz()
+  open            Float
+  high            Float
+  low             Float
+  close           Float
+  volume          Float
+  quote_volume    Float?   @map("quote_volume")
+  trades          Int?
+  taker_buy_base  Float?   @map("taker_buy_base")
+  taker_buy_quote Float?   @map("taker_buy_quote")
+
+  @@unique([asset, timestamp], name: "uq_15m_asset_ts")
+  @@index([asset])
+  @@index([timestamp])
+  @@map("asset_prices_15m")
+}
+
+model VolumeBreakout {
+  id              Int       @id @default(autoincrement())
+  symbol          String    @db.VarChar(20)
+  timeframe       String    @db.VarChar(4)
+  signal_time     DateTime  @db.Timestamptz() @map("signal_time")
+
+  open            Float
+  high            Float
+  low             Float
+  close           Float
+  volume          Float
+  quote_volume    Float     @map("quote_volume")
+  trades          Int?
+
+  vol_ratio       Float     @map("vol_ratio")
+  vol_avg_20      Float     @map("vol_avg_20")
+
+  price_change_1bar   Float?  @map("price_change_1bar")
+  price_change_2bar   Float?  @map("price_change_2bar")
+  atr_14              Float?  @map("atr_14")
+  bar_range_pct       Float?  @map("bar_range_pct")
+  upper_wick_pct      Float?  @map("upper_wick_pct")
+  lower_wick_pct      Float?  @map("lower_wick_pct")
+  body_pct            Float?  @map("body_pct")
+  direction           Int     @db.SmallInt
+
+  dist_from_20_high   Float?  @map("dist_from_20_high")
+  dist_from_20_low    Float?  @map("dist_from_20_low")
+  price_vs_ema_50     Float?  @map("price_vs_ema_50")
+  rsi_14              Float?  @map("rsi_14")
+  volatility_20       Float?  @map("volatility_20")
+
+  btc_price           Float?  @map("btc_price")
+  btc_ret_24bar       Float?  @map("btc_ret_24bar")
+  btc_ret_96bar       Float?  @map("btc_ret_96bar")
+  btc_vol_ratio       Float?  @map("btc_vol_ratio")
+
+  fwd_ret_12h         Float?  @map("fwd_ret_12h")
+  fwd_ret_24h         Float?  @map("fwd_ret_24h")
+  fwd_ret_48h         Float?  @map("fwd_ret_48h")
+  fwd_ret_1w          Float?  @map("fwd_ret_1w")
+  fwd_ret_2w          Float?  @map("fwd_ret_2w")
+  fwd_ret_1m          Float?  @map("fwd_ret_1m")
+
+  fwd_max_gain_12h    Float?  @map("fwd_max_gain_12h")
+  fwd_max_gain_24h    Float?  @map("fwd_max_gain_24h")
+  fwd_max_gain_48h    Float?  @map("fwd_max_gain_48h")
+  fwd_max_gain_1w     Float?  @map("fwd_max_gain_1w")
+  fwd_max_loss_12h    Float?  @map("fwd_max_loss_12h")
+  fwd_max_loss_24h    Float?  @map("fwd_max_loss_24h")
+  fwd_max_loss_48h    Float?  @map("fwd_max_loss_48h")
+  fwd_max_loss_1w     Float?  @map("fwd_max_loss_1w")
+
+  created_at      DateTime  @default(now()) @db.Timestamptz() @map("created_at")
+
+  @@unique([symbol, timeframe, signal_time], name: "uq_vb_sym_tf_time")
+  @@index([symbol])
+  @@index([timeframe])
+  @@index([signal_time])
+  @@index([vol_ratio])
+  @@map("volume_breakouts")
+}

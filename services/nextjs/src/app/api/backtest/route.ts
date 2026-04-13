@@ -23,6 +23,7 @@ export async function GET(_request: NextRequest) {
             losing_trades: 0,
           },
           monthly: [],
+          weekly: [],
           equity_curve: [],
         },
       });
@@ -135,6 +136,44 @@ export async function GET(_request: NextRequest) {
           data.trades > 0 ? (data.wins / data.trades) * 100 : 0,
       }));
 
+    const weeklyMap = new Map<
+      string,
+      { return_idr: number; trades: number; wins: number }
+    >();
+    for (const p of closedPositions) {
+      const date = p.closed_at ?? p.opened_at;
+      const d = new Date(date);
+      const jan1 = new Date(d.getFullYear(), 0, 1);
+      const dayOfYear = Math.ceil(
+        (d.getTime() - jan1.getTime()) / 86_400_000
+      );
+      const weekNum = Math.ceil((dayOfYear + jan1.getDay()) / 7);
+      const weekKey = `${d.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+      const existing = weeklyMap.get(weekKey) || {
+        return_idr: 0,
+        trades: 0,
+        wins: 0,
+      };
+      existing.return_idr += p.pnl_idr ?? 0;
+      existing.trades += 1;
+      if ((p.pnl_idr ?? 0) > 0) existing.wins += 1;
+      weeklyMap.set(weekKey, existing);
+    }
+
+    const weekly = Array.from(weeklyMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([week, data]) => ({
+        week,
+        return_idr: data.return_idr,
+        return_pct:
+          data.trades > 0
+            ? (data.return_idr / (data.trades * 1_000_000)) * 100
+            : 0,
+        trades: data.trades,
+        win_rate:
+          data.trades > 0 ? (data.wins / data.trades) * 100 : 0,
+      }));
+
     return NextResponse.json({
       data: {
         metrics: {
@@ -149,6 +188,7 @@ export async function GET(_request: NextRequest) {
           losing_trades: losingTrades.length,
         },
         monthly,
+        weekly,
         equity_curve: equityCurve,
       },
     });
