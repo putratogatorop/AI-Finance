@@ -46,6 +46,14 @@ logging.basicConfig(
 logger = logging.getLogger("ingest")
 
 
+class PermanentHTTPError(Exception):
+    """HTTP 400 — retrying will not help (invalid pair, param out of range, etc.)."""
+    def __init__(self, code: int, body: str):
+        self.code = code
+        self.body = body
+        super().__init__(f"HTTP {code}: {body}")
+
+
 def fetch_json(url: str, retries: int = 3):
     for attempt in range(retries):
         try:
@@ -58,6 +66,10 @@ def fetch_json(url: str, retries: int = 3):
                 body = e.read().decode()[:200]
             except Exception:
                 pass
+            # 400 = permanent (bad param/delisted pair). No point retrying.
+            if e.code == 400:
+                logger.warning(f"HTTP 400 (permanent) for {url}: {body}")
+                raise PermanentHTTPError(e.code, body) from e
             logger.warning(f"HTTP {e.code} for {url}: {body}")
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
@@ -68,8 +80,13 @@ def fetch_json(url: str, retries: int = 3):
     return None
 
 
+DELISTED: set[str] = set()
+
+
 def fetch_candles(pair: str, from_ts: int | None = None, limit: int = MAX_BARS_PER_REQUEST):
     """Fetch 15m candles. If from_ts given, fetch forward from there; else latest N."""
+    if pair in DELISTED:
+        return []
     url = f"{GATEIO_BASE}/spot/candlesticks?currency_pair={pair}&interval={CANDLE_INTERVAL_STR}"
     if from_ts is not None:
         # Gate.io counts the end bar — (limit-1) * CANDLE_SECONDS = 1000 bars max
@@ -77,7 +94,15 @@ def fetch_candles(pair: str, from_ts: int | None = None, limit: int = MAX_BARS_P
         url += f"&from={from_ts}&to={to_ts}"
     else:
         url += f"&limit={limit}"
-    data = fetch_json(url)
+    try:
+        data = fetch_json(url)
+    except PermanentHTTPError as e:
+        if "INVALID_CURRENCY_PAIR" in e.body:
+            DELISTED.add(pair)
+            save_delisted(DELISTED)
+            logger.info(f"  blacklisted delisted pair: {pair}")
+        # "Candlestick too long ago" etc. — also won't succeed at this from_ts
+        return []
     if not data or not isinstance(data, list):
         return []
     rows = []
@@ -165,7 +190,19 @@ def asset_to_pair(asset: str) -> str:
 
 
 STRICT_FLAG_FILE = Path("logs/.last_strict_scan")
+DELISTED_FILE = Path("logs/.delisted_pairs.json")
 LENIENT_LOOKBACK_DAYS = 30
+
+
+def load_delisted() -> set[str]:
+    try:
+        return set(json.loads(DELISTED_FILE.read_text()))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def save_delisted(pairs: set[str]) -> None:
+    DELISTED_FILE.write_text(json.dumps(sorted(pairs)))
 
 
 def find_gaps_for_asset(conn, asset: str, since_ts: datetime) -> list[tuple[int, int]]:
@@ -342,6 +379,10 @@ def main():
     logger.info("=" * 60)
     logger.info("CANDLE INGEST DAEMON")
     logger.info("=" * 60)
+
+    DELISTED.update(load_delisted())
+    if DELISTED:
+        logger.info(f"Loaded delisted blacklist: {len(DELISTED)} pairs skipped")
 
     conn = psycopg2.connect(**DB_CONN)
 
