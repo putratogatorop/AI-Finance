@@ -1,3 +1,9 @@
+# Terraform
+*.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -12,8 +18,10 @@ build/
 # Data lake (large files, don't commit)
 data/raw/hourly/
 data/raw/daily/
+data/raw/15m/
 data/raw/fundamentals/
 data/raw/index/
+data/analysis/
 
 # ML model weights (saved checkpoints, not source code)
 /models/
@@ -32,5 +40,12 @@ Thumbs.db
 # Next.js
 services/nextjs/node_modules/
 services/nextjs/.next/
+services/python/.next/
 services/nextjs/coverage/
 services/nextjs/next-env.d.ts
+services/nextjs/tsconfig.tsbuildinfo
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/settings.local.json
