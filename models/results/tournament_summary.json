@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-04-12",
+  "verified": true,
+  "note": "Dual-direction scanner. SHORT v2 ML>=0.90 + LONG v2 ML>=0.80. Run both live for market-agnostic coverage.",
+  "total_samples": 1305695,
+  "total_tokens": 198,
+  "period": "2023-04 to 2026-04 (198 coins, 15min bars)",
+  "fee_rate_pct": 0.03,
+  "models": [
+    {
+      "rank": 1,
+      "name": "LONG v2 ML>=0.80 (pump->pullback->reclaim)",
+      "tier": "ml",
+      "direction": "long",
+      "sharpe": null,
+      "total_return_pct": 1135,
+      "win_rate": 93.1,
+      "profit_factor": 17.86,
+      "trades": 261,
+      "avg_return_pct": 4.35
+    },
+    {
+      "rank": 2,
+      "name": "SHORT-only ML>=0.90 TP6.5/SL1 (1/day)",
+      "tier": "ml",
+      "direction": "short",
+      "sharpe": null,
+      "total_return_pct": 1856,
+      "win_rate": 48.5,
+      "profit_factor": 6.10,
+      "trades": 707,
+      "avg_return_pct": 2.63
+    }
+  ],
+  "research_stats": {
+    "volume_breakouts_total": 1305695,
+    "big_movers_total": 154485,
+    "big_mover_rate": 11.8,
+    "vol_spike_correlation": 99.5,
+    "best_exit_strategy": "TP 5% / SL 5% (long), TP 6.5% / SL 1% (short)",
+    "profitable_months_pct": 97,
+    "coins_in_whitelist": 50,
+    "long_ml_threshold": 0.80,
+    "short_ml_threshold": 0.90,
+    "direction": "dual (long + short)"
+  }
+}
