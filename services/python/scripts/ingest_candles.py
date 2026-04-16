@@ -221,12 +221,13 @@ def bootstrap_if_empty(conn):
         cur.execute("SELECT count(DISTINCT asset) FROM asset_prices_15m")
         asset_count = cur.fetchone()[0]
 
-    # Only trigger if coverage is way below target (handles partial bootstraps too)
-    if asset_count >= BOOTSTRAP_PAIR_COUNT // 2:
+    # Resume bootstrap whenever coverage falls below target — lets us pick up
+    # after a crash without manual intervention.
+    if asset_count >= BOOTSTRAP_PAIR_COUNT:
         return
 
     logger.info("=" * 60)
-    logger.info(f"BOOTSTRAP: DB has {asset_count} assets (< {BOOTSTRAP_PAIR_COUNT // 2} threshold)")
+    logger.info(f"BOOTSTRAP: DB has {asset_count}/{BOOTSTRAP_PAIR_COUNT} assets")
     logger.info(f"Seeding top {BOOTSTRAP_PAIR_COUNT} USDT pairs with {BOOTSTRAP_DAYS}d of 15m bars")
     logger.info("=" * 60)
 
@@ -236,27 +237,43 @@ def bootstrap_if_empty(conn):
         logger.error("Bootstrap aborted: tickers endpoint returned no pairs")
         return
 
+    # Skip pairs that are already reasonably complete (> 80% of expected bars)
+    expected_bars = int(BOOTSTRAP_DAYS * 86400 / CANDLE_SECONDS)
+    skip_threshold = int(expected_bars * 0.8)
+    with conn.cursor() as cur:
+        cur.execute("SELECT asset, count(*) FROM asset_prices_15m GROUP BY asset")
+        existing = {row[0]: row[1] for row in cur.fetchall()}
+
     now_ts = int(time.time())
     start_ts = now_ts - BOOTSTRAP_DAYS * 86400
     total_rows = 0
+    failed: list[str] = []
     t_start = time.time()
 
     for i, pair in enumerate(pairs, 1):
         asset = pair_to_asset(pair)
-        cursor_ts = start_ts
-        pair_rows = 0
-        while cursor_ts < now_ts:
-            rows = fetch_candles(pair, from_ts=cursor_ts, limit=MAX_BARS_PER_REQUEST)
-            if not rows:
-                break
-            pair_rows += upsert_candles(conn, asset, rows)
-            last_ts = int(rows[-1]["timestamp"].timestamp())
-            if last_ts <= cursor_ts:
-                break
-            cursor_ts = last_ts + CANDLE_SECONDS
-            time.sleep(REQUEST_SLEEP_SEC)
+        if existing.get(asset, 0) >= skip_threshold:
+            continue  # resume: skip pairs already filled
 
-        total_rows += pair_rows
+        try:
+            cursor_ts = start_ts
+            pair_rows = 0
+            while cursor_ts < now_ts:
+                rows = fetch_candles(pair, from_ts=cursor_ts, limit=MAX_BARS_PER_REQUEST)
+                if not rows:
+                    break
+                pair_rows += upsert_candles(conn, asset, rows)
+                last_ts = int(rows[-1]["timestamp"].timestamp())
+                if last_ts <= cursor_ts:
+                    break
+                cursor_ts = last_ts + CANDLE_SECONDS
+                time.sleep(REQUEST_SLEEP_SEC)
+            total_rows += pair_rows
+        except Exception as e:
+            logger.warning(f"  [{i}/{len(pairs)}] {asset} failed: {type(e).__name__}: {e}")
+            failed.append(asset)
+            continue
+
         if i % 10 == 0 or i == len(pairs):
             elapsed = time.time() - t_start
             rate = i / max(elapsed, 1)
@@ -267,7 +284,10 @@ def bootstrap_if_empty(conn):
             )
 
     logger.info(f"Bootstrap complete: {total_rows} bars across {len(pairs)} pairs "
-                f"in {time.time() - t_start:.0f}s")
+                f"in {time.time() - t_start:.0f}s; {len(failed)} failed")
+    if failed:
+        logger.info(f"Failed pairs (will retry next bootstrap): {', '.join(failed[:20])}"
+                    + (" ..." if len(failed) > 20 else ""))
 
 
 STRICT_FLAG_FILE = Path("logs/.last_strict_scan")
