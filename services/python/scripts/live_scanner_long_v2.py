@@ -31,6 +31,7 @@ import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 GATEIO_BASE = "https://api.gateio.ws/api/v4"
 MODEL_PATH = Path("models/scanner_long_v2_ml.joblib")
+SCANNER_TOP_N = int(os.environ.get("SCANNER_TOP_N", "100"))
 
 VOL_SPIKE = 3.0
 PRICE_RISE_THRESH = 0.05
@@ -426,7 +427,7 @@ def main():
 
     sorted_pairs = sorted(tickers.items(), key=lambda x: x[1]["quote_volume"], reverse=True)
     loaded = 0
-    for pair, _ in sorted_pairs[:100]:
+    for pair, _ in sorted_pairs[:SCANNER_TOP_N]:
         if pair == "BTC_USDT":
             continue
         df = fetch_candles(pair)
@@ -462,7 +463,7 @@ def main():
                     btc_df = btc_new
                     candle_cache["BTC_USDT"] = btc_df
                 sorted_pairs = sorted(tickers.items(), key=lambda x: x[1]["quote_volume"], reverse=True)
-                for pair, _ in sorted_pairs[:100]:
+                for pair, _ in sorted_pairs[:SCANNER_TOP_N]:
                     if pair == "BTC_USDT":
                         continue
                     df = fetch_candles(pair)
