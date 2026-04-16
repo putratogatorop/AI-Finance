@@ -12,7 +12,8 @@
     "test:watch": "jest --watch",
     "test:ci": "jest --ci --coverage",
     "prisma:generate": "prisma generate",
-    "prisma:db:pull": "prisma db pull"
+    "prisma:db:pull": "prisma db pull",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
