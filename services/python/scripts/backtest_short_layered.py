@@ -17,7 +17,8 @@ from sqlalchemy.orm import sessionmaker
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 DATA_DIR = "../../data/raw/15m"
 THRESHOLD = 0.90
 BARS_24H = 96  # 24h of 15m candles

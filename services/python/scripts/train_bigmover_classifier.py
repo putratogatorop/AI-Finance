@@ -32,7 +32,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 MODEL_PATH = Path("models/bigmover_classifier.joblib")
 
 FEATURE_COLS = [

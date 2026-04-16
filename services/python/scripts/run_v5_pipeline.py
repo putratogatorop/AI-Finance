@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 
 ASSETS = ["BTC", "LINK", "XRP", "AVAX"]
 

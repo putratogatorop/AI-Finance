@@ -21,7 +21,8 @@ import pandas as pd
 from lightgbm import LGBMClassifier
 from sqlalchemy import create_engine, text
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 MODEL_PATH = Path("models/scanner_short_v2_ml.joblib")
 
 FEATURE_COLS = [

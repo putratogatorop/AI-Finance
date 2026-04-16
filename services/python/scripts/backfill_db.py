@@ -26,7 +26,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 RAW_DIR = Path("C:/Users/togat/Desktop/AI-Finance/data/raw/btc_4h")
 START = datetime(2024, 3, 1, tzinfo=UTC)
 BATCH_SIZE = 500

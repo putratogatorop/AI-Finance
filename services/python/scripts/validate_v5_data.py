@@ -12,7 +12,8 @@ sys.path.insert(0, ".")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 TRADES_DIR = Path("C:/Users/togat/Desktop/AI-Finance/data/features/v5/agg_trades")
 V5_ASSETS = ["BTC", "LINK", "XRP", "AVAX"]
 

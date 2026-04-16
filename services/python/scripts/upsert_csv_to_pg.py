@@ -21,7 +21,8 @@ sys.path.insert(0, ".")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 RAW_DIR = Path("C:/Users/togat/Desktop/AI-Finance/data/raw/4h")
 BATCH_SIZE = 1000
 
