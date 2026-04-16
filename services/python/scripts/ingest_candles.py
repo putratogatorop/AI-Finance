@@ -38,6 +38,9 @@ REQUEST_SLEEP_SEC = 0.1         # be polite to API
 POLL_INTERVAL_SEC = 60 * 15     # run ingest every 15 min
 LIVE_BARS_PER_COIN = 4          # on each tick, fetch last 4 bars (handles missed cycles)
 
+BOOTSTRAP_PAIR_COUNT = int(os.environ.get("BOOTSTRAP_PAIR_COUNT", "200"))
+BOOTSTRAP_DAYS = int(os.environ.get("BOOTSTRAP_DAYS", "90"))
+
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -191,6 +194,80 @@ def asset_to_pair(asset: str) -> str:
     if asset.endswith("USDT"):
         return asset[:-4] + "_USDT"
     return asset
+
+
+def pair_to_asset(pair: str) -> str:
+    """BTC_USDT -> BTCUSDT."""
+    return pair.replace("_", "")
+
+
+def fetch_top_usdt_pairs(n: int) -> list[str]:
+    """Top N USDT spot pairs by 24h quote volume. Used to seed an empty DB."""
+    data = fetch_json(f"{GATEIO_BASE}/spot/tickers")
+    if not data or not isinstance(data, list):
+        return []
+    usdt = [t for t in data if t.get("currency_pair", "").endswith("_USDT")]
+    usdt.sort(key=lambda t: float(t.get("quote_volume") or 0), reverse=True)
+    return [t["currency_pair"] for t in usdt[:n] if t["currency_pair"] not in DELISTED]
+
+
+def bootstrap_if_empty(conn):
+    """Seed an empty (or near-empty) DB with BOOTSTRAP_DAYS of 15m candles for the
+    top BOOTSTRAP_PAIR_COUNT USDT pairs. Skips if we already have enough coverage.
+
+    Idempotent: uses upsert. Safe to re-run after a partial bootstrap.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(DISTINCT asset) FROM asset_prices_15m")
+        asset_count = cur.fetchone()[0]
+
+    # Only trigger if coverage is way below target (handles partial bootstraps too)
+    if asset_count >= BOOTSTRAP_PAIR_COUNT // 2:
+        return
+
+    logger.info("=" * 60)
+    logger.info(f"BOOTSTRAP: DB has {asset_count} assets (< {BOOTSTRAP_PAIR_COUNT // 2} threshold)")
+    logger.info(f"Seeding top {BOOTSTRAP_PAIR_COUNT} USDT pairs with {BOOTSTRAP_DAYS}d of 15m bars")
+    logger.info("=" * 60)
+
+    pairs = fetch_top_usdt_pairs(BOOTSTRAP_PAIR_COUNT)
+    logger.info(f"Gate.io returned {len(pairs)} candidate pairs")
+    if not pairs:
+        logger.error("Bootstrap aborted: tickers endpoint returned no pairs")
+        return
+
+    now_ts = int(time.time())
+    start_ts = now_ts - BOOTSTRAP_DAYS * 86400
+    total_rows = 0
+    t_start = time.time()
+
+    for i, pair in enumerate(pairs, 1):
+        asset = pair_to_asset(pair)
+        cursor_ts = start_ts
+        pair_rows = 0
+        while cursor_ts < now_ts:
+            rows = fetch_candles(pair, from_ts=cursor_ts, limit=MAX_BARS_PER_REQUEST)
+            if not rows:
+                break
+            pair_rows += upsert_candles(conn, asset, rows)
+            last_ts = int(rows[-1]["timestamp"].timestamp())
+            if last_ts <= cursor_ts:
+                break
+            cursor_ts = last_ts + CANDLE_SECONDS
+            time.sleep(REQUEST_SLEEP_SEC)
+
+        total_rows += pair_rows
+        if i % 10 == 0 or i == len(pairs):
+            elapsed = time.time() - t_start
+            rate = i / max(elapsed, 1)
+            eta = (len(pairs) - i) / max(rate, 0.01)
+            logger.info(
+                f"  [{i}/{len(pairs)}] {asset}: +{pair_rows} bars "
+                f"(total {total_rows}, {elapsed:.0f}s elapsed, ~{eta:.0f}s remaining)"
+            )
+
+    logger.info(f"Bootstrap complete: {total_rows} bars across {len(pairs)} pairs "
+                f"in {time.time() - t_start:.0f}s")
 
 
 STRICT_FLAG_FILE = Path("logs/.last_strict_scan")
@@ -389,6 +466,9 @@ def main():
         logger.info(f"Loaded delisted blacklist: {len(DELISTED)} pairs skipped")
 
     conn = psycopg2.connect(**DB_CONN)
+
+    # Self-seed on fresh deploy — no-op if DB already has reasonable coverage
+    bootstrap_if_empty(conn)
 
     # CDC gap scan: strict on first run of the day, lenient otherwise
     strict = should_run_strict()
