@@ -1,3 +1,19 @@
+x-python-service: &python-service
+  build:
+    context: ./services/python
+    dockerfile: Dockerfile
+  env_file: .env
+  restart: unless-stopped
+  working_dir: /app
+  depends_on:
+    postgres:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -32,20 +48,21 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  python:
-    build:
-      context: ./services/python
-      dockerfile: Dockerfile
-    env_file: .env
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+  ingest:
+    <<: *python-service
+    command: ["python", "scripts/ingest_candles.py"]
+
+  scanner-short:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_v2.py"]
+
+  scanner-long:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_long_v2.py"]
+
+  paper:
+    <<: *python-service
+    command: ["python", "scripts/paper_executor.py"]
 
 volumes:
   postgres_data:

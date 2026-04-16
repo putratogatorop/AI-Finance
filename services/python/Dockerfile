@@ -11,5 +11,7 @@ RUN pip install --no-cache-dir -e ".[dev]"
 
 COPY src/ src/
 COPY tests/ tests/
+COPY scripts/ scripts/
+COPY models/ models/
 
 CMD ["python", "-m", "src.main"]

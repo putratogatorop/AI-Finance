@@ -24,7 +24,8 @@ from src.db.models import Base, VolumeBreakout
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_URL = "postgresql://postgres:MySQL100%25@localhost:5432/market"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 RAW_DIR = Path("C:/Users/togat/Desktop/AI-Finance/data/raw/15m")
 VOL_RATIO_MIN = 2.0
 BATCH_SIZE = 1000

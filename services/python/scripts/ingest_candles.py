@@ -23,8 +23,12 @@ from psycopg2.extras import execute_values
 
 sys.path.insert(0, ".")
 
-DB_CONN = dict(host="localhost", port=5432, dbname="market",
-               user="postgres", password="MySQL100%")
+import os
+from urllib.parse import urlparse as _urlparse
+_DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
+_p = _urlparse(_DB_URL)
+DB_CONN = dict(host=_p.hostname, port=_p.port or 5432, dbname=(_p.path or "/").lstrip("/"),
+               user=_p.username, password=_p.password)
 GATEIO_BASE = "https://api.gateio.ws/api/v4"
 
 CANDLE_INTERVAL_STR = "15m"
