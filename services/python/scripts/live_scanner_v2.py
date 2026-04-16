@@ -32,6 +32,7 @@ import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 GATEIO_BASE = "https://api.gateio.ws/api/v4"
 MODEL_PATH = Path("models/scanner_short_v2_ml.joblib")
+SCANNER_TOP_N = int(os.environ.get("SCANNER_TOP_N", "100"))
 
 # Scanner params (match backtest_short_v2.py)
 VOL_SPIKE = 3.0
@@ -587,7 +588,7 @@ def main():
     # Pre-load top pairs by volume
     sorted_pairs = sorted(tickers.items(), key=lambda x: x[1]["quote_volume"], reverse=True)
     loaded = 0
-    for pair, _ in sorted_pairs[:100]:
+    for pair, _ in sorted_pairs[:SCANNER_TOP_N]:
         if pair == "BTC_USDT":
             continue
         df = fetch_candles(pair)
@@ -635,7 +636,7 @@ def main():
                     tickers.items(), key=lambda x: x[1]["quote_volume"], reverse=True
                 )
                 updated = 0
-                for pair, _ in sorted_pairs[:100]:
+                for pair, _ in sorted_pairs[:SCANNER_TOP_N]:
                     if pair == "BTC_USDT":
                         continue
                     df = fetch_candles(pair)
