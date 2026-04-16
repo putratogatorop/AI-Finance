@@ -81,7 +81,7 @@ export default async function ScannerShortPage({ searchParams }: Props) {
   const SIM_TABLE = V2_ML_TABLE;
   let simTrades: any[] = [];
   let simTotal = 0;
-  let simStats = { trades: 0, wins: 0, wr: 0, pf: 0, finalEquity: 0, totalReturn: 0, months: 0, monthlyAvg: 0 };
+  const simStats = { trades: 0, wins: 0, wr: 0, pf: 0, finalEquity: 0, totalReturn: 0, months: 0, monthlyAvg: 0 };
   try {
     const simCountRows: any[] = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int as n FROM (
