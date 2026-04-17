@@ -36,6 +36,9 @@ import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 GATEIO_BASE = "https://api.gateio.ws/api/v4"
 
+# Multi-threshold paper accounts — each runs independently
+THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60]
+
 # Portfolio sim
 STARTING_EQUITY_USD = 100.0   # paper $100; adjust to match what you'd start live
 POSITION_PCT = 0.10           # 10% of equity per trade (matches backtest)
@@ -129,15 +132,16 @@ def ensure_paper_table(engine):
                 id SERIAL PRIMARY KEY,
                 source_table VARCHAR(40) NOT NULL,
                 source_id INTEGER NOT NULL,
+                threshold DOUBLE PRECISION NOT NULL DEFAULT 0.80,
                 symbol VARCHAR(20) NOT NULL,
-                direction VARCHAR(5) NOT NULL,  -- 'long' or 'short'
+                direction VARCHAR(5) NOT NULL,
                 ml_prob DOUBLE PRECISION,
                 entry_time TIMESTAMPTZ NOT NULL,
                 entry_price DOUBLE PRECISION NOT NULL,
                 position_usd DOUBLE PRECISION NOT NULL,
                 tp_price DOUBLE PRECISION NOT NULL,
                 sl_price DOUBLE PRECISION NOT NULL,
-                status VARCHAR(15) DEFAULT 'open',  -- open, won, lost, timeout, cancelled
+                status VARCHAR(15) DEFAULT 'open',
                 exit_time TIMESTAMPTZ,
                 exit_price DOUBLE PRECISION,
                 exit_reason VARCHAR(20),
@@ -145,9 +149,19 @@ def ensure_paper_table(engine):
                 pnl_usd DOUBLE PRECISION,
                 fees_usd DOUBLE PRECISION,
                 equity_after DOUBLE PRECISION,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE (source_table, source_id)
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )
+        """))
+        conn.execute(text("""
+            ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS threshold
+            DOUBLE PRECISION NOT NULL DEFAULT 0.80
+        """))
+        conn.execute(text(
+            "DROP INDEX IF EXISTS paper_trades_source_table_source_id_key"
+        ))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_src_threshold
+            ON paper_trades (source_table, source_id, threshold)
         """))
 
 
@@ -164,76 +178,59 @@ class Signal:
     signal_time: datetime
 
 
-def fetch_new_signals(engine) -> list[Signal]:
-    """Fetch signals from both tables not yet in paper_trades."""
+def fetch_recent_signals(engine) -> list[Signal]:
+    """Fetch all active signals from last 48h. Threshold filtering happens in open loop."""
     signals: list[Signal] = []
     with engine.begin() as conn:
-        # Long signals
-        rows = conn.execute(text("""
-            SELECT s.id, s.symbol, s.ml_prob, s.entry_price, s.signal_time
-            FROM scanner_signals_long_v2 s
-            LEFT JOIN paper_trades p
-              ON p.source_table = 'scanner_signals_long_v2' AND p.source_id = s.id
-            WHERE p.id IS NULL AND s.status = 'active'
-            ORDER BY s.signal_time
-        """)).fetchall()
-        for r in rows:
-            signals.append(Signal(
-                source_table="scanner_signals_long_v2",
-                source_id=r[0], symbol=r[1], direction="long",
-                ml_prob=float(r[2] or 0), entry_price=float(r[3]),
-                signal_time=r[4],
-            ))
-        # Short signals
-        rows = conn.execute(text("""
-            SELECT s.id, s.symbol, s.ml_prob, s.entry_price, s.signal_time
-            FROM scanner_signals_v2 s
-            LEFT JOIN paper_trades p
-              ON p.source_table = 'scanner_signals_v2' AND p.source_id = s.id
-            WHERE p.id IS NULL AND s.status = 'active'
-            ORDER BY s.signal_time
-        """)).fetchall()
-        for r in rows:
-            signals.append(Signal(
-                source_table="scanner_signals_v2",
-                source_id=r[0], symbol=r[1], direction="short",
-                ml_prob=float(r[2] or 0), entry_price=float(r[3]),
-                signal_time=r[4],
-            ))
+        for tbl, direction in [
+            ("scanner_signals_long_v2", "long"),
+            ("scanner_signals_v2", "short"),
+        ]:
+            rows = conn.execute(text(f"""
+                SELECT id, symbol, ml_prob, entry_price, signal_time
+                FROM {tbl}
+                WHERE status = 'active'
+                  AND signal_time >= NOW() - INTERVAL '48 hours'
+                ORDER BY signal_time
+            """)).fetchall()
+            for r in rows:
+                signals.append(Signal(
+                    source_table=tbl, source_id=r[0], symbol=r[1],
+                    direction=direction, ml_prob=float(r[2] or 0),
+                    entry_price=float(r[3]), signal_time=r[4],
+                ))
     return signals
 
 
-def current_equity(engine) -> float:
-    """Compute current equity: starting + sum of closed pnl."""
+def current_equity(engine, threshold: float) -> float:
     with engine.begin() as conn:
         row = conn.execute(text("""
             SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
-            WHERE status IN ('won', 'lost', 'timeout')
-        """)).fetchone()
-    realized = float(row[0]) if row else 0.0
-    return STARTING_EQUITY_USD + realized
+            WHERE threshold = :th AND status IN ('won', 'lost', 'timeout')
+        """), {"th": threshold}).fetchone()
+    return STARTING_EQUITY_USD + (float(row[0]) if row else 0.0)
 
 
-def open_positions(engine) -> int:
+def open_positions(engine, threshold: float) -> int:
     with engine.begin() as conn:
-        row = conn.execute(text("SELECT COUNT(*) FROM paper_trades WHERE status = 'open'")).fetchone()
+        row = conn.execute(text(
+            "SELECT COUNT(*) FROM paper_trades WHERE threshold = :th AND status = 'open'"
+        ), {"th": threshold}).fetchone()
     return int(row[0]) if row else 0
 
 
-def today_pnl_pct(engine) -> float:
-    """Realized PnL today as fraction of starting equity (for kill-switch)."""
+def today_pnl_pct(engine, threshold: float) -> float:
     with engine.begin() as conn:
         row = conn.execute(text("""
             SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
-            WHERE exit_time >= CURRENT_DATE AND status IN ('won', 'lost', 'timeout')
-        """)).fetchone()
-    realized = float(row[0]) if row else 0.0
-    return realized / STARTING_EQUITY_USD
+            WHERE threshold = :th AND exit_time >= CURRENT_DATE
+              AND status IN ('won', 'lost', 'timeout')
+        """), {"th": threshold}).fetchone()
+    return (float(row[0]) if row else 0.0) / STARTING_EQUITY_USD
 
 
-def open_paper_trade(engine, sig: Signal):
-    """Simulate placing a market entry + TP + SL order set on Gate.io."""
-    equity = current_equity(engine)
+def open_paper_trade(engine, sig: Signal, threshold: float):
+    equity = current_equity(engine, threshold)
     position_usd = equity * POSITION_PCT * LEVERAGE
 
     if sig.direction == "long":
@@ -243,43 +240,37 @@ def open_paper_trade(engine, sig: Signal):
         tp_price = sig.entry_price * (1 - TP_PCT)
         sl_price = sig.entry_price * (1 + SL_PCT)
 
-    # This is what WOULD be sent to Gate.io. Log it clearly.
-    logger.info("=" * 60)
-    logger.info(f"[DRY-RUN ORDER] {sig.direction.upper()} {sig.symbol}")
-    logger.info(f"  Entry:    ${sig.entry_price:.6f} (market)")
-    logger.info(f"  Size:     ${position_usd:.2f} @ {LEVERAGE}x leverage")
-    logger.info(f"  TP:       ${tp_price:.6f}  (+{TP_PCT*100:.1f}%)")
-    logger.info(f"  SL:       ${sl_price:.6f}  (-{SL_PCT*100:.1f}%)")
-    logger.info(f"  ML:       {sig.ml_prob:.2f}")
-    logger.info(f"  Equity:   ${equity:.2f}  (open pos: {open_positions(engine)+1}/{MAX_OPEN_POSITIONS})")
-    logger.info("=" * 60)
+    logger.info(
+        f"[DRY-RUN @{threshold}] {sig.direction.upper()} {sig.symbol} "
+        f"ml={sig.ml_prob:.2f} entry=${sig.entry_price:.6f} eq=${equity:.2f}"
+    )
 
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO paper_trades
-            (source_table, source_id, symbol, direction, ml_prob, entry_time,
-             entry_price, position_usd, tp_price, sl_price, status)
-            VALUES (:st, :sid, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open')
-            ON CONFLICT (source_table, source_id) DO NOTHING
+            (source_table, source_id, threshold, symbol, direction, ml_prob,
+             entry_time, entry_price, position_usd, tp_price, sl_price, status)
+            VALUES (:st, :sid, :th, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open')
+            ON CONFLICT (source_table, source_id, threshold) DO NOTHING
         """), {
-            "st": sig.source_table, "sid": sig.source_id, "sym": sig.symbol,
-            "dir": sig.direction, "ml": sig.ml_prob,
+            "st": sig.source_table, "sid": sig.source_id, "th": threshold,
+            "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
             "et": sig.signal_time, "ep": sig.entry_price,
             "pos": position_usd, "tp": tp_price, "sl": sl_price,
         })
 
 
 def check_and_close_trades(engine):
-    """For each open trade, fetch current price; mark exit if TP/SL/timeout hit."""
+    """For each open trade across all thresholds, check TP/SL/timeout."""
     with engine.begin() as conn:
         trades = conn.execute(text("""
             SELECT id, symbol, direction, entry_price, entry_time,
-                   position_usd, tp_price, sl_price
+                   position_usd, tp_price, sl_price, threshold
             FROM paper_trades WHERE status = 'open'
         """)).fetchall()
 
     for t in trades:
-        trade_id, symbol, direction, entry, entry_time, pos_usd, tp, sl = t
+        trade_id, symbol, direction, entry, entry_time, pos_usd, tp, sl, threshold = t
         price = fetch_last_price(symbol)
         if price is None:
             continue
@@ -316,7 +307,7 @@ def check_and_close_trades(engine):
 
         fees = pos_usd * FEE_RATE * 2  # entry + exit
         pnl_usd = pos_usd * pnl_pct - fees
-        equity_after = current_equity(engine) + pnl_usd
+        equity_after = current_equity(engine, threshold) + pnl_usd
 
         status = "won" if pnl_usd > 0 else ("lost" if exit_reason == "stop_loss" else "timeout")
 
@@ -350,12 +341,13 @@ def main():
     ensure_paper_table(engine)
 
     logger.info("=" * 60)
-    logger.info("PAPER EXECUTOR (DRY-RUN) — no real orders will be placed")
-    logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f}")
+    logger.info("PAPER EXECUTOR (DRY-RUN) — multi-threshold")
+    logger.info(f"Thresholds:      {THRESHOLDS}")
+    logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per threshold")
     logger.info(f"Position size:   {POSITION_PCT*100:.0f}% @ {LEVERAGE}x")
     logger.info(f"TP/SL:           +{TP_PCT*100:.0f}% / -{SL_PCT*100:.0f}% (max {MAX_BARS_HOLD} bars = 48h)")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
-    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS}")
+    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per threshold")
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")
     logger.info("=" * 60)
 
@@ -363,33 +355,28 @@ def main():
     while True:
         try:
             cycle += 1
-            # 1. Check and close existing open trades
             check_and_close_trades(engine)
 
-            # 2. Fetch new signals
-            new_sigs = fetch_new_signals(engine)
+            new_sigs = fetch_recent_signals(engine)
 
-            # Apply safety gates
-            if new_sigs:
-                halted = today_pnl_pct(engine) <= -MAX_DAILY_LOSS_PCT
+            for th in THRESHOLDS:
+                halted = today_pnl_pct(engine, th) <= -MAX_DAILY_LOSS_PCT
                 if halted:
-                    logger.warning(f"KILL-SWITCH: daily PnL <= -{MAX_DAILY_LOSS_PCT*100:.0f}%, "
-                                   f"dropping {len(new_sigs)} new signals")
-                    new_sigs = []
-
-            for sig in new_sigs:
-                if open_positions(engine) >= MAX_OPEN_POSITIONS:
-                    logger.warning(f"MAX POSITIONS ({MAX_OPEN_POSITIONS}) reached — "
-                                   f"skipping {sig.direction.upper()} {sig.symbol}")
                     continue
-                open_paper_trade(engine, sig)
+                for sig in new_sigs:
+                    if sig.ml_prob < th:
+                        continue
+                    if open_positions(engine, th) >= MAX_OPEN_POSITIONS:
+                        break
+                    open_paper_trade(engine, sig, th)
 
-            # Periodic status
             if cycle % 10 == 0:
-                eq = current_equity(engine)
-                op = open_positions(engine)
-                logger.info(f"Cycle {cycle}: equity=${eq:.2f} open={op} "
-                            f"ret={(eq/STARTING_EQUITY_USD-1)*100:+.1f}%")
+                parts = []
+                for th in THRESHOLDS:
+                    eq = current_equity(engine, th)
+                    op = open_positions(engine, th)
+                    parts.append(f"{th}=${eq:.0f}({op})")
+                logger.info(f"Cycle {cycle}: {' | '.join(parts)}")
 
             time.sleep(POLL_INTERVAL_SEC)
 
