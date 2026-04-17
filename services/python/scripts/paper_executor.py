@@ -157,7 +157,7 @@ def ensure_paper_table(engine):
             DOUBLE PRECISION NOT NULL DEFAULT 0.80
         """))
         conn.execute(text(
-            "DROP INDEX IF EXISTS paper_trades_source_table_source_id_key"
+            "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
         ))
         conn.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_src_threshold
