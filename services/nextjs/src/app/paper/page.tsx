@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
 const PER_PAGE = 20;
@@ -130,14 +131,14 @@ export default async function PaperTradesPage({ searchParams }: Props) {
           <span className="text-sm text-slate-400">ML Threshold:</span>
           <div className="flex gap-1">
             {THRESHOLDS.map(th => (
-              <a key={th} href={`/paper?threshold=${th}`}
+              <Link key={th} href={`/paper?threshold=${th}`}
                 className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
                   th === threshold
                     ? "bg-brand-500 text-white"
                     : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
                 }`}>
                 {th.toFixed(2)}
-              </a>
+              </Link>
             ))}
           </div>
         </div>
@@ -165,9 +166,9 @@ export default async function PaperTradesPage({ searchParams }: Props) {
                 return (
                   <tr key={row.threshold} className={`border-b border-[var(--border)] ${isCurrent ? "bg-brand-500/10" : "hover:bg-slate-800/50"}`}>
                     <td className="px-3 py-1.5">
-                      <a href={`/paper?threshold=${row.threshold}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
+                      <Link href={`/paper?threshold=${row.threshold}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
                         {Number(row.threshold).toFixed(2)} {isCurrent ? "◄" : ""}
-                      </a>
+                      </Link>
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono text-slate-300">{row.trades}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-blue-400">{row.open_n}</td>
@@ -286,9 +287,9 @@ export default async function PaperTradesPage({ searchParams }: Props) {
         <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
           <h2 className="text-sm font-semibold text-slate-200">Closed Trades ({totalClosed})</h2>
           <div className="flex items-center gap-2 text-xs">
-            {page > 1 && <a href={`?page=${page-1}&status=${statusFilter}&direction=${dirFilter}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Prev</a>}
+            {page > 1 && <Link href={`?page=${page-1}&status=${statusFilter}&direction=${dirFilter}&threshold=${threshold}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Prev</Link>}
             <span className="text-slate-500">{page}/{totalPages}</span>
-            {page < totalPages && <a href={`?page=${page+1}&status=${statusFilter}&direction=${dirFilter}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Next</a>}
+            {page < totalPages && <Link href={`?page=${page+1}&status=${statusFilter}&direction=${dirFilter}&threshold=${threshold}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Next</Link>}
           </div>
         </div>
         {closedTrades.length === 0 ? (
