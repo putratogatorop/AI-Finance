@@ -742,13 +742,8 @@ def main():
                             logger.error(f"ML prediction error for {pair}: {e}")
                             continue
 
-                        if ml_prob < ML_THRESHOLD:
-                            logger.info(
-                                f"  REJECT: {pair} ml={ml_prob:.2f} < {ML_THRESHOLD}"
-                            )
-                            continue
-
-                    # Write signal
+                    # Write ALL pattern-confirmed signals regardless of ML score.
+                    # Paper executor filters by threshold.
                     signal_data = {
                         "vol_ratio": state.dump_vol_ratio,
                         "price_drop": (state.bounce_high - entry_price) / state.bounce_high,
@@ -759,8 +754,9 @@ def main():
                     recent_signals[symbol] = now
                     signals_written += 1
 
+                    tag = "SIGNAL" if ml_prob >= ML_THRESHOLD else "SIGNAL(low-ml)"
                     logger.info(
-                        f"  SIGNAL: {pair} SHORT | ml={ml_prob:.2f} "
+                        f"  {tag}: {pair} SHORT | ml={ml_prob:.2f} "
                         f"vol={state.dump_vol_ratio:.1f}x bounce={bounce_pct:.1%} "
                         f"entry=${entry_price:.4f}"
                     )

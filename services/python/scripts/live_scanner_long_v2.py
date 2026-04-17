@@ -540,10 +540,6 @@ def main():
                         except Exception as e:
                             logger.error(f"ML error for {pair}: {e}")
                             continue
-                        if ml_prob < ML_THRESHOLD:
-                            logger.info(f"  REJECT: {pair} ml={ml_prob:.2f} < {ML_THRESHOLD}")
-                            continue
-
                     signal_data = {
                         "vol_ratio": state.pump_vol_ratio,
                         "price_rise": (entry_price - state.pullback_low) / state.pullback_low,
@@ -554,8 +550,9 @@ def main():
                     recent_signals[symbol] = now
                     signals_written += 1
 
+                    tag = "SIGNAL" if ml_prob >= ML_THRESHOLD else "SIGNAL(low-ml)"
                     logger.info(
-                        f"  SIGNAL: {pair} LONG | ml={ml_prob:.2f} "
+                        f"  {tag}: {pair} LONG | ml={ml_prob:.2f} "
                         f"vol={state.pump_vol_ratio:.1f}x pullback={pullback_pct:.1%} "
                         f"entry=${entry_price:.4f}"
                     )

@@ -3,8 +3,10 @@ import { prisma } from "@/lib/prisma";
 const PER_PAGE = 20;
 const STARTING_EQUITY = 100.0;
 
+const THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60];
+
 interface Props {
-  searchParams: Promise<{ page?: string; status?: string; direction?: string }>;
+  searchParams: Promise<{ page?: string; status?: string; direction?: string; threshold?: string }>;
 }
 
 export default async function PaperTradesPage({ searchParams }: Props) {
@@ -12,6 +14,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
   const page = Math.max(1, parseInt(params.page || "1") || 1);
   const statusFilter = params.status || "all";
   const dirFilter = params.direction || "all";
+  const threshold = parseFloat(params.threshold || "0.80");
 
   // Aggregate stats
   let stats = {
@@ -32,7 +35,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
         COALESCE(ROUND(AVG(pnl_pct) FILTER (WHERE pnl_pct IS NOT NULL)::numeric*100,2),0) as avg_pnl,
         COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl_usd,
         COALESCE(ROUND(SUM(fees_usd)::numeric,2),0) as total_fees
-      FROM paper_trades
+      FROM paper_trades WHERE threshold = ${threshold}
     `);
     if (r[0]) {
       stats = {
@@ -52,7 +55,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
     openTrades = await prisma.$queryRawUnsafe(`
       SELECT id, symbol, direction, ml_prob, entry_time, entry_price,
         position_usd, tp_price, sl_price
-      FROM paper_trades WHERE status='open'
+      FROM paper_trades WHERE status='open' AND threshold = ${threshold}
       ORDER BY entry_time DESC
     `);
   } catch {}
@@ -63,7 +66,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
     equityCurve = await prisma.$queryRawUnsafe(`
       SELECT exit_time, equity_after, pnl_usd, direction
       FROM paper_trades
-      WHERE status IN ('won','lost','timeout')
+      WHERE status IN ('won','lost','timeout') AND threshold = ${threshold}
       ORDER BY exit_time DESC LIMIT 100
     `);
     equityCurve = [...equityCurve].reverse();
@@ -73,8 +76,8 @@ export default async function PaperTradesPage({ searchParams }: Props) {
   let closedTrades: any[] = [];
   let totalClosed = 0;
   try {
-    let wh = "WHERE status IN ('won','lost','timeout')";
-    if (statusFilter !== "all") wh = `WHERE status = '${statusFilter}'`;
+    let wh = `WHERE threshold = ${threshold} AND status IN ('won','lost','timeout')`;
+    if (statusFilter !== "all") wh = `WHERE threshold = ${threshold} AND status = '${statusFilter}'`;
     if (dirFilter !== "all") wh += ` AND direction = '${dirFilter}'`;
 
     const cr: any[] = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::int as n FROM paper_trades ${wh}`);
@@ -94,17 +97,91 @@ export default async function PaperTradesPage({ searchParams }: Props) {
   const maxEquity = Math.max(STARTING_EQUITY, ...equityCurve.map((e: any) => Number(e.equity_after) || 0));
   const minEquity = Math.min(STARTING_EQUITY, ...equityCurve.map((e: any) => Number(e.equity_after) || STARTING_EQUITY));
 
+  // Comparison summary across all thresholds
+  let thresholdSummary: any[] = [];
+  try {
+    thresholdSummary = await prisma.$queryRawUnsafe(`
+      SELECT threshold,
+        COUNT(*)::int as trades,
+        COUNT(*) FILTER (WHERE status='open')::int as open_n,
+        COALESCE(ROUND(COUNT(*) FILTER (WHERE status='won')::numeric
+          /GREATEST(COUNT(*) FILTER (WHERE status IN ('won','lost','timeout')),1)*100,1),0) as wr,
+        COALESCE(ROUND(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd>0),0)::numeric
+          /ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0),0))::numeric,2),0) as pf,
+        COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl,
+        ROUND((100.0 + COALESCE(SUM(pnl_usd),0))::numeric,2) as equity
+      FROM paper_trades GROUP BY threshold ORDER BY threshold DESC
+    `);
+  } catch {}
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">
-          Paper Trading{" "}
-          <span className="text-sm font-normal text-yellow-400">DRY-RUN · No real orders</span>
-        </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Dual-direction dry-run executor. Starting equity ${STARTING_EQUITY.toFixed(2)} | 10% position · 1x leverage · TP 5% / SL 5% / 48h timeout
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">
+            Paper Trading{" "}
+            <span className="text-sm font-normal text-yellow-400">DRY-RUN · No real orders</span>
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Multi-threshold comparison. Starting equity ${STARTING_EQUITY.toFixed(2)} per threshold
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-400">ML Threshold:</span>
+          <div className="flex gap-1">
+            {THRESHOLDS.map(th => (
+              <a key={th} href={`/paper?threshold=${th}`}
+                className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
+                  th === threshold
+                    ? "bg-brand-500 text-white"
+                    : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+                }`}>
+                {th.toFixed(2)}
+              </a>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* Threshold comparison table */}
+      {thresholdSummary.length > 0 && (
+        <div className="card overflow-hidden p-0">
+          <div className="px-4 py-3 border-b border-[var(--border)]">
+            <h2 className="text-sm font-semibold text-slate-200">Threshold Comparison</h2>
+          </div>
+          <table className="w-full text-xs">
+            <thead><tr className="border-b border-[var(--border)]">
+              <th className="px-3 py-2 text-left text-slate-500">Threshold</th>
+              <th className="px-3 py-2 text-right text-slate-500">Trades</th>
+              <th className="px-3 py-2 text-right text-slate-500">Open</th>
+              <th className="px-3 py-2 text-right text-slate-500">Win Rate</th>
+              <th className="px-3 py-2 text-right text-slate-500">Profit Factor</th>
+              <th className="px-3 py-2 text-right text-slate-500">PnL</th>
+              <th className="px-3 py-2 text-right text-slate-500">Equity</th>
+            </tr></thead>
+            <tbody>
+              {thresholdSummary.map((row: any) => {
+                const isCurrent = Number(row.threshold) === threshold;
+                return (
+                  <tr key={row.threshold} className={`border-b border-[var(--border)] ${isCurrent ? "bg-brand-500/10" : "hover:bg-slate-800/50"}`}>
+                    <td className="px-3 py-1.5">
+                      <a href={`/paper?threshold=${row.threshold}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
+                        {Number(row.threshold).toFixed(2)} {isCurrent ? "◄" : ""}
+                      </a>
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">{row.trades}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-blue-400">{row.open_n}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">{Number(row.wr).toFixed(1)}%</td>
+                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.pf) >= 1.5 ? "text-green-400" : Number(row.pf) >= 1 ? "text-yellow-400" : "text-red-400"}`}>{Number(row.pf).toFixed(2)}</td>
+                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.total_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>${Number(row.total_pnl).toFixed(2)}</td>
+                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.equity) >= 100 ? "text-green-400" : "text-red-400"}`}>${Number(row.equity).toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Headline KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
