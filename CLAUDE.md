@@ -2,12 +2,9 @@
 
 ## Compute
 
-- User has **Colab Pro** subscription. Use it for heavy computation (ML training, large data processing, anything GPU-bound).
-- **Never** suggest running training locally — always offload to Colab.
-- **Colab browser UI** is the preferred workflow: open notebooks directly in Colab from GitHub. VS Code kernel connection is unreliable (upload widgets, rendering bugs).
-- Large data files (`.npz`, `.parquet`) go to Google Drive at `My Drive/ai-finance/`. Notebooks copy from Drive — never use `files.upload()` widget.
-- For Phase 1 training (small models): T4 GPU is sufficient. Save A100 for Phase 2 or larger workloads.
-- Checkpoints save to Google Drive for crash recovery.
+- ML training and backtesting run **locally** (Mac) or on the **VPS** for lightweight jobs.
+- Large data files (`.npz`, `.parquet`) go to Google Drive at `My Drive/ai-finance/` for backup.
+- GPU training: run locally if Mac supports it, otherwise use cloud GPU as needed.
 
 ## Code Style
 
@@ -31,20 +28,19 @@ Two environments with strict separation of concerns:
 ### VPS (Biznet NEO Lite MM 8.8 — Jakarta, 8 vCPU / 8GB RAM / 60GB SSD)
 - **Purpose: LIVE TRADING ONLY.** Scanner, paper/live executor, dashboard, Gate.io order routing.
 - **Postgres retention: last 90 days max.** Older candles/signals get pruned or archived to Drive.
-- **No backtesting, no ML training, no historical data loads.** Keep the VPS light — any script that scans years of data belongs on local/Colab.
+- **No backtesting, no ML training, no historical data loads.** Keep the VPS light — any script that scans years of data belongs on local.
 - Stack: Docker Compose (Postgres + Python workers + Next.js), same as `docker-compose.yml`.
 - Deploy via `git pull` + `docker compose up -d --build`.
 
 ### Local (Mac)
-- **Purpose: research, backtesting, data pipeline, feature engineering.**
+- **Purpose: research, backtesting, ML training, data pipeline, feature engineering.**
 - Holds full historical datasets (Parquet on disk / Google Drive).
 - Develops and validates strategies before promoting to VPS.
-- ML training still offloads to Colab (see Compute section).
 
 ### Data flow
 - Historical Parquet lives on Google Drive / local — **never on VPS**.
 - VPS Postgres pulls from Gate.io live + keeps a rolling 90-day window.
-- Models trained on Colab → artifacts saved to Drive → downloaded to VPS for inference.
+- Models trained locally → committed to repo → deployed to VPS for inference.
 
 When writing code, always ask: "does this run on VPS or local?" VPS code must stay lean and stateless w.r.t. long history.
 
