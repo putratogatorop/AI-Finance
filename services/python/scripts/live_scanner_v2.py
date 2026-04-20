@@ -40,8 +40,8 @@ PRICE_DROP_THRESH = 0.05
 VOL_MA_PERIOD = 20
 PRICE_LOOKBACK = 96
 BTC_EMA_PERIOD = 30
-BOUNCE_MIN_PCT = 0.02       # Bounce must recover at least 2%
-REJECTION_PCT = 0.03         # Bounce gives back 3% = rejection
+BOUNCE_MIN_PCT = float(os.environ.get("BOUNCE_MIN_PCT", "0.02"))
+REJECTION_PCT = float(os.environ.get("REJECTION_PCT", "0.03"))
 MAX_BARS_AFTER_DUMP = 96     # 24h window for bounce+rejection
 COOLDOWN_SECONDS = 96 * 900  # 96 bars * 15min = 24h
 
