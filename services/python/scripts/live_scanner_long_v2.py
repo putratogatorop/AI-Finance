@@ -51,6 +51,7 @@ CANDLE_INTERVAL_STR = "15m"
 HISTORY_BARS = 2100  # ~22 days — enough for 20-day EMA regime filter
 MIN_VOLUME_USD = 500_000
 REGIME_CACHE_SECONDS = 3600
+REGIME_FILTER_ENABLED = os.environ.get("REGIME_FILTER_ENABLED", "true").lower() != "false"
 
 FEATURE_COLS = [
     "vol_ratio", "price_move", "price_change_1bar", "price_change_4bar",
@@ -365,20 +366,25 @@ def ensure_table(engine):
                 entry_price DOUBLE PRECISION,
                 pnl_pct DOUBLE PRECISION,
                 exit_reason VARCHAR(20),
+                regime_allowed BOOLEAN,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
+        conn.execute(text(
+            "ALTER TABLE scanner_signals_long_v2 "
+            "ADD COLUMN IF NOT EXISTS regime_allowed BOOLEAN"
+        ))
 
 
-def write_signal(engine, symbol, signal_data, ml_prob):
+def write_signal(engine, symbol, signal_data, ml_prob, regime_allowed):
     with engine.begin() as conn:
         conn.execute(
             text("""
                 INSERT INTO scanner_signals_long_v2
                 (symbol, direction, ml_prob, vol_ratio, price_rise, pullback_pct,
-                 signal_time, status, entry_price)
+                 signal_time, status, entry_price, regime_allowed)
                 VALUES (:symbol, 1, :ml_prob, :vol_ratio, :price_rise, :pullback_pct,
-                        :signal_time, 'active', :entry_price)
+                        :signal_time, 'active', :entry_price, :regime_allowed)
             """),
             {
                 "symbol": symbol, "ml_prob": ml_prob,
@@ -387,6 +393,7 @@ def write_signal(engine, symbol, signal_data, ml_prob):
                 "pullback_pct": signal_data["pullback_pct"],
                 "signal_time": datetime.now(timezone.utc),
                 "entry_price": signal_data["entry_price"],
+                "regime_allowed": regime_allowed,
             },
         )
 
@@ -400,6 +407,7 @@ def main():
         f"Params: vol_spike={VOL_SPIKE} rise_thresh={PRICE_RISE_THRESH} "
         f"pullback_min={PULLBACK_MIN_PCT} reclaim={RECLAIM_PCT} ml_thresh={ML_THRESHOLD}"
     )
+    logger.info(f"Regime filter: {'ENABLED (backtest-matched)' if REGIME_FILTER_ENABLED else 'DISABLED (signals will fire regardless of BTC regime)'}")
 
     engine = create_engine(DB_URL)
     ensure_table(engine)
@@ -480,7 +488,7 @@ def main():
                     last_regime_check = now
                     logger.info(f"Cycle {cycle}: Regime -> {'ALLOWED' if regime_allowed else 'BLOCKED'}")
 
-            if not regime_allowed:
+            if REGIME_FILTER_ENABLED and not regime_allowed:
                 for s in coin_states.values():
                     s.phase = "idle"
                 if cycle % 15 == 0:
@@ -548,7 +556,7 @@ def main():
                         "pullback_pct": pullback_pct,
                         "entry_price": entry_price,
                     }
-                    write_signal(engine, symbol, signal_data, ml_prob)
+                    write_signal(engine, symbol, signal_data, ml_prob, regime_allowed)
                     recent_signals[symbol] = now
                     signals_written += 1
 
