@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { readFileSync, existsSync } from "fs";
+import { SystemStatus } from "@/components/system-status";
 
 const PER_PAGE = 10;
 
@@ -215,6 +216,7 @@ export default async function ScannerPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
+      <SystemStatus />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">
