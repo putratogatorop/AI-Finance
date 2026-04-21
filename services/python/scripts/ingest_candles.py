@@ -23,6 +23,8 @@ from psycopg2.extras import execute_values
 
 sys.path.insert(0, ".")
 
+from src import db_adapters  # noqa: F401  # registers numpy→psycopg2 adapters
+
 import os
 from urllib.parse import urlparse as _urlparse
 _DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
