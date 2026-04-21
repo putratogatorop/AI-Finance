@@ -2,6 +2,23 @@ import { prisma } from "@/lib/prisma";
 
 type Tone = "green" | "yellow" | "red" | "gray";
 
+async function fetchUniverseSizes(): Promise<{ spotUsdt: number | null; futuresUsdt: number | null }> {
+  try {
+    const [spotResp, futResp] = await Promise.all([
+      fetch("https://api.gateio.ws/api/v4/spot/currency_pairs", { next: { revalidate: 3600 } }),
+      fetch("https://api.gateio.ws/api/v4/futures/usdt/contracts", { next: { revalidate: 3600 } }),
+    ]);
+    const spot: { quote?: string }[] = await spotResp.json();
+    const fut: unknown[] = await futResp.json();
+    return {
+      spotUsdt: Array.isArray(spot) ? spot.filter(p => p?.quote === "USDT").length : null,
+      futuresUsdt: Array.isArray(fut) ? fut.length : null,
+    };
+  } catch {
+    return { spotUsdt: null, futuresUsdt: null };
+  }
+}
+
 async function fetchOne(sql: string): Promise<any[]> {
   try {
     return (await prisma.$queryRawUnsafe(sql)) as any[];
@@ -49,7 +66,7 @@ function ago(ts: Date | string | null): { label: string; tone: Tone } {
 }
 
 export async function SystemStatus() {
-  const s = await fetchHeartbeats();
+  const [s, universe] = await Promise.all([fetchHeartbeats(), fetchUniverseSizes()]);
 
   // Ingest tone: fresh = green, stale > 20 min = red
   const ingestMins = s.ingestTs ? (Date.now() - new Date(s.ingestTs).getTime()) / 60000 : Infinity;
@@ -93,6 +110,15 @@ export async function SystemStatus() {
         <Item tone={lastLong.tone} label="Last LONG signal" value={lastLong.label} />
         <Item tone={lastPaper.tone} label="Last paper trade" value={lastPaper.label} />
       </div>
+      {(universe.spotUsdt != null || universe.futuresUsdt != null) && (
+        <p className="text-[10px] text-slate-500 mt-2 font-mono">
+          Universe:{" "}
+          <span className="text-green-400">LONG {universe.spotUsdt ?? "?"} spot</span>
+          {" · "}
+          <span className="text-red-400">SHORT {universe.futuresUsdt ?? "?"} perps</span>
+          {" (top-N by 24h volume per cycle)"}
+        </p>
+      )}
       {allQuiet && ingestTone === "green" && (
         <p className="text-[10px] text-slate-500 mt-2">
           Workers are running — fresh candles are landing in the DB. Zero signals means the market hasn&rsquo;t produced a setup yet;

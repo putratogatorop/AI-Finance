@@ -86,16 +86,33 @@ def fetch_json(url: str, retries: int = 2):
     return None
 
 
-def fetch_last_price(symbol_usdt: str) -> float | None:
-    """Fetch last spot price. symbol_usdt e.g. 'BTCUSDT' -> pair 'BTC_USDT'."""
+def fetch_last_price(symbol_usdt: str, venue: str = "spot") -> float | None:
+    """Fetch last price for a symbol. venue='spot' (long) or 'futures' (short).
+
+    Long trades mark against spot — that's where a 1x long would actually clear.
+    Short trades mark against the USDT perp — short is only tradeable on futures,
+    and the perp's last price is what determines PnL / liquidation on a real short.
+    Marking a short against spot would introduce spot-perp basis drift (0.05-0.3%
+    on altcoins) between paper and any eventual live execution.
+    """
     pair = symbol_usdt.replace("USDT", "_USDT") if "_" not in symbol_usdt else symbol_usdt
-    data = fetch_json(f"{GATEIO_BASE}/spot/tickers?currency_pair={pair}")
+    if venue == "futures":
+        data = fetch_json(f"{GATEIO_BASE}/futures/usdt/tickers?contract={pair}")
+    else:
+        data = fetch_json(f"{GATEIO_BASE}/spot/tickers?currency_pair={pair}")
     if not data or not isinstance(data, list) or len(data) == 0:
         return None
     try:
         return float(data[0].get("last", 0))
     except (ValueError, TypeError):
         return None
+
+
+def venue_for_direction(direction: str) -> str:
+    """Long can execute on spot or futures; we use spot (simpler, no funding).
+    Short requires futures — spot has no short mechanic.
+    """
+    return "futures" if direction == "short" else "spot"
 
 
 # ── DB schema ────────────────────────────────────────────────────────
@@ -152,6 +169,7 @@ def ensure_paper_table(engine):
                 fees_usd DOUBLE PRECISION,
                 equity_after DOUBLE PRECISION,
                 regime_allowed BOOLEAN,
+                venue VARCHAR(10),
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
@@ -161,6 +179,9 @@ def ensure_paper_table(engine):
         """))
         conn.execute(text(
             "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS regime_allowed BOOLEAN"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS venue VARCHAR(10)"
         ))
         conn.execute(text(
             "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
@@ -253,21 +274,22 @@ def open_paper_trade(engine, sig: Signal, threshold: float):
         f"ml={sig.ml_prob:.2f} entry=${sig.entry_price:.6f} eq=${equity:.2f}"
     )
 
+    venue = venue_for_direction(sig.direction)
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO paper_trades
             (source_table, source_id, threshold, symbol, direction, ml_prob,
              entry_time, entry_price, position_usd, tp_price, sl_price, status,
-             regime_allowed)
+             regime_allowed, venue)
             VALUES (:st, :sid, :th, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open',
-                    :regime)
+                    :regime, :venue)
             ON CONFLICT (source_table, source_id, threshold) DO NOTHING
         """), {
             "st": sig.source_table, "sid": sig.source_id, "th": threshold,
             "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
             "et": sig.signal_time, "ep": sig.entry_price,
             "pos": position_usd, "tp": tp_price, "sl": sl_price,
-            "regime": sig.regime_allowed,
+            "regime": sig.regime_allowed, "venue": venue,
         })
 
 
@@ -282,7 +304,7 @@ def check_and_close_trades(engine):
 
     for t in trades:
         trade_id, symbol, direction, entry, entry_time, pos_usd, tp, sl, threshold = t
-        price = fetch_last_price(symbol)
+        price = fetch_last_price(symbol, venue=venue_for_direction(direction))
         if price is None:
             continue
 

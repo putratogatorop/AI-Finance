@@ -119,21 +119,26 @@ def fetch_json(url: str, retries: int = 2) -> dict | list | None:
 
 
 def fetch_all_tickers() -> dict[str, dict]:
-    """Fetch all Gate.io spot tickers. Returns {pair: {last, vol, ...}}."""
-    data = fetch_json(f"{GATEIO_BASE}/spot/tickers")
+    """Fetch all Gate.io USDT-perpetual FUTURES tickers. Returns {contract: {last, vol, ...}}.
+
+    Short signals can only be executed on futures (spot has no borrow/short mechanic),
+    so the short scanner's universe is restricted to the ~668 USDT perps. Every symbol
+    the scanner signals is therefore guaranteed to have a tradeable contract.
+    """
+    data = fetch_json(f"{GATEIO_BASE}/futures/usdt/tickers")
     if not data:
         return {}
 
     tickers = {}
     for t in data:
-        pair = t.get("currency_pair", "")
+        pair = t.get("contract", "")
         if not pair.endswith("_USDT"):
             continue
         try:
             tickers[pair] = {
                 "last": float(t.get("last", 0)),
-                "base_volume": float(t.get("base_volume", 0)),
-                "quote_volume": float(t.get("quote_volume", 0)),
+                "base_volume": float(t.get("volume_24h_base", 0)),
+                "quote_volume": float(t.get("volume_24h_quote", 0)),
                 "high_24h": float(t.get("high_24h", 0)),
                 "low_24h": float(t.get("low_24h", 0)),
                 "change_pct": float(t.get("change_percentage", 0)),
@@ -587,7 +592,7 @@ def main():
 
     # Get initial ticker list
     tickers = fetch_all_tickers()
-    logger.info(f"Found {len(tickers)} USDT pairs on Gate.io")
+    logger.info(f"Found {len(tickers)} USDT futures perps on Gate.io")
 
     # Fetch BTC candles first
     btc_df = fetch_candles("BTC_USDT")
