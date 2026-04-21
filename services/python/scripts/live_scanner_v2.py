@@ -28,6 +28,8 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, ".")
 
+from src import db_adapters  # noqa: F401  # registers numpy→psycopg2 adapters
+
 import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 GATEIO_BASE = "https://api.gateio.ws/api/v4"

@@ -27,6 +27,8 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, ".")
 
+from src import db_adapters  # noqa: F401  # registers numpy→psycopg2 adapters
+
 # ── HARD SAFETY ──────────────────────────────────────────────────────
 DRY_RUN = True  # NEVER change to False in this file — real trading is a separate script
 assert DRY_RUN, "paper_executor.py must always be DRY_RUN"
