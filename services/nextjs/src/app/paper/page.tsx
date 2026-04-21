@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { SystemStatus } from "@/components/system-status";
 
 const PER_PAGE = 20;
 const STARTING_EQUITY = 100.0;
@@ -117,6 +118,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
+      <SystemStatus />
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">
