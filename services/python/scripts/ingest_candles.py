@@ -521,6 +521,22 @@ def main():
         except KeyboardInterrupt:
             logger.info("Ingest daemon stopped by user.")
             break
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            # Postgres restart / network blip killed the connection. Reconnect.
+            # Without this, every subsequent cycle would retry on the dead
+            # socket and silently produce zero bars.
+            logger.error(f"Cycle {cycle} DB connection lost: {e}. Reconnecting in 5s...")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            time.sleep(5)
+            try:
+                conn = psycopg2.connect(**DB_CONN)
+                logger.info("Reconnected to postgres")
+            except Exception as reconnect_err:
+                logger.error(f"Reconnect failed: {reconnect_err}. Will retry on next cycle.")
+                time.sleep(30)
         except Exception as e:
             logger.error(f"Cycle {cycle} error: {e}", exc_info=True)
             time.sleep(60)
