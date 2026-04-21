@@ -151,6 +151,7 @@ def ensure_paper_table(engine):
                 pnl_usd DOUBLE PRECISION,
                 fees_usd DOUBLE PRECISION,
                 equity_after DOUBLE PRECISION,
+                regime_allowed BOOLEAN,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
@@ -158,6 +159,9 @@ def ensure_paper_table(engine):
             ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS threshold
             DOUBLE PRECISION NOT NULL DEFAULT 0.80
         """))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS regime_allowed BOOLEAN"
+        ))
         conn.execute(text(
             "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
         ))
@@ -178,6 +182,7 @@ class Signal:
     ml_prob: float
     entry_price: float
     signal_time: datetime
+    regime_allowed: bool | None  # None for pre-migration rows
 
 
 def fetch_recent_signals(engine) -> list[Signal]:
@@ -189,7 +194,7 @@ def fetch_recent_signals(engine) -> list[Signal]:
             ("scanner_signals_v2", "short"),
         ]:
             rows = conn.execute(text(f"""
-                SELECT id, symbol, ml_prob, entry_price, signal_time
+                SELECT id, symbol, ml_prob, entry_price, signal_time, regime_allowed
                 FROM {tbl}
                 WHERE status = 'active'
                   AND signal_time >= NOW() - INTERVAL '48 hours'
@@ -200,6 +205,7 @@ def fetch_recent_signals(engine) -> list[Signal]:
                     source_table=tbl, source_id=r[0], symbol=r[1],
                     direction=direction, ml_prob=float(r[2] or 0),
                     entry_price=float(r[3]), signal_time=r[4],
+                    regime_allowed=r[5],
                 ))
     return signals
 
@@ -251,14 +257,17 @@ def open_paper_trade(engine, sig: Signal, threshold: float):
         conn.execute(text("""
             INSERT INTO paper_trades
             (source_table, source_id, threshold, symbol, direction, ml_prob,
-             entry_time, entry_price, position_usd, tp_price, sl_price, status)
-            VALUES (:st, :sid, :th, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open')
+             entry_time, entry_price, position_usd, tp_price, sl_price, status,
+             regime_allowed)
+            VALUES (:st, :sid, :th, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open',
+                    :regime)
             ON CONFLICT (source_table, source_id, threshold) DO NOTHING
         """), {
             "st": sig.source_table, "sid": sig.source_id, "th": threshold,
             "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
             "et": sig.signal_time, "ep": sig.entry_price,
             "pos": position_usd, "tp": tp_price, "sl": sl_price,
+            "regime": sig.regime_allowed,
         })
 
 

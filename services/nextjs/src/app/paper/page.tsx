@@ -7,8 +7,23 @@ const STARTING_EQUITY = 100.0;
 
 const THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60];
 
+type RegimeFilter = "all" | "aligned" | "against" | "unknown";
+const REGIME_OPTIONS: { key: RegimeFilter; label: string; hint: string }[] = [
+  { key: "all",     label: "All",     hint: "both regime states + untagged" },
+  { key: "aligned", label: "Aligned", hint: "regime_allowed = TRUE (filter would have passed)" },
+  { key: "against", label: "Against", hint: "regime_allowed = FALSE (filter would have blocked)" },
+  { key: "unknown", label: "Untagged", hint: "pre-migration rows without regime state" },
+];
+
+function regimeSqlFragment(regime: RegimeFilter): string {
+  if (regime === "aligned") return " AND regime_allowed = TRUE";
+  if (regime === "against") return " AND regime_allowed = FALSE";
+  if (regime === "unknown") return " AND regime_allowed IS NULL";
+  return "";
+}
+
 interface Props {
-  searchParams: Promise<{ page?: string; status?: string; direction?: string; threshold?: string }>;
+  searchParams: Promise<{ page?: string; status?: string; direction?: string; threshold?: string; regime?: string }>;
 }
 
 export default async function PaperTradesPage({ searchParams }: Props) {
@@ -17,6 +32,8 @@ export default async function PaperTradesPage({ searchParams }: Props) {
   const statusFilter = params.status || "all";
   const dirFilter = params.direction || "all";
   const threshold = parseFloat(params.threshold || "0.80");
+  const regime: RegimeFilter = (REGIME_OPTIONS.find(r => r.key === params.regime)?.key) || "all";
+  const regimeClause = regimeSqlFragment(regime);
 
   // Aggregate stats
   let stats = {
@@ -37,7 +54,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
         COALESCE(ROUND(AVG(pnl_pct) FILTER (WHERE pnl_pct IS NOT NULL)::numeric*100,2),0) as avg_pnl,
         COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl_usd,
         COALESCE(ROUND(SUM(fees_usd)::numeric,2),0) as total_fees
-      FROM paper_trades WHERE threshold = ${threshold}
+      FROM paper_trades WHERE threshold = ${threshold}${regimeClause}
     `);
     if (r[0]) {
       stats = {
@@ -57,7 +74,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
     openTrades = await prisma.$queryRawUnsafe(`
       SELECT id, symbol, direction, ml_prob, entry_time, entry_price,
         position_usd, tp_price, sl_price
-      FROM paper_trades WHERE status='open' AND threshold = ${threshold}
+      FROM paper_trades WHERE status='open' AND threshold = ${threshold}${regimeClause}
       ORDER BY entry_time DESC
     `);
   } catch {}
@@ -68,7 +85,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
     equityCurve = await prisma.$queryRawUnsafe(`
       SELECT exit_time, equity_after, pnl_usd, direction
       FROM paper_trades
-      WHERE status IN ('won','lost','timeout') AND threshold = ${threshold}
+      WHERE status IN ('won','lost','timeout') AND threshold = ${threshold}${regimeClause}
       ORDER BY exit_time DESC LIMIT 100
     `);
     equityCurve = [...equityCurve].reverse();
@@ -81,6 +98,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
     let wh = `WHERE threshold = ${threshold} AND status IN ('won','lost','timeout')`;
     if (statusFilter !== "all") wh = `WHERE threshold = ${threshold} AND status = '${statusFilter}'`;
     if (dirFilter !== "all") wh += ` AND direction = '${dirFilter}'`;
+    wh += regimeClause;
 
     const cr: any[] = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::int as n FROM paper_trades ${wh}`);
     totalClosed = cr[0]?.n || 0;
@@ -112,7 +130,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
           /ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0),0))::numeric,2),0) as pf,
         COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl,
         ROUND((100.0 + COALESCE(SUM(pnl_usd),0))::numeric,2) as equity
-      FROM paper_trades GROUP BY threshold ORDER BY threshold DESC
+      FROM paper_trades WHERE 1=1${regimeClause} GROUP BY threshold ORDER BY threshold DESC
     `);
   } catch {}
 
@@ -129,19 +147,37 @@ export default async function PaperTradesPage({ searchParams }: Props) {
             Multi-threshold comparison. Starting equity ${STARTING_EQUITY.toFixed(2)} per threshold
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-400">ML Threshold:</span>
-          <div className="flex gap-1">
-            {THRESHOLDS.map(th => (
-              <Link key={th} href={`/paper?threshold=${th}`}
-                className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
-                  th === threshold
-                    ? "bg-brand-500 text-white"
-                    : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
-                }`}>
-                {th.toFixed(2)}
-              </Link>
-            ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">ML Threshold:</span>
+            <div className="flex gap-1">
+              {THRESHOLDS.map(th => (
+                <Link key={th} href={`/paper?threshold=${th}${regime !== "all" ? `&regime=${regime}` : ""}`}
+                  className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
+                    th === threshold
+                      ? "bg-brand-500 text-white"
+                      : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+                  }`}>
+                  {th.toFixed(2)}
+                </Link>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">Regime:</span>
+            <div className="flex gap-1">
+              {REGIME_OPTIONS.map(r => (
+                <Link key={r.key} href={`/paper?threshold=${threshold}${r.key !== "all" ? `&regime=${r.key}` : ""}`}
+                  title={r.hint}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                    r.key === regime
+                      ? "bg-purple-500 text-white"
+                      : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+                  }`}>
+                  {r.label}
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -168,7 +204,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
                 return (
                   <tr key={row.threshold} className={`border-b border-[var(--border)] ${isCurrent ? "bg-brand-500/10" : "hover:bg-slate-800/50"}`}>
                     <td className="px-3 py-1.5">
-                      <Link href={`/paper?threshold=${row.threshold}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
+                      <Link href={`/paper?threshold=${row.threshold}${regime !== "all" ? `&regime=${regime}` : ""}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
                         {Number(row.threshold).toFixed(2)} {isCurrent ? "◄" : ""}
                       </Link>
                     </td>
