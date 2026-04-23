@@ -39,7 +39,9 @@ def test_fixture_helper_builds_expected_shape():
     ])
     assert len(df) == 2
     assert list(df.columns) == ["signal_time", "ml_prob", "pnl_pct", "bars_held"]
-    assert df["signal_time"].dtype == "datetime64[ns, UTC]"
+    # pandas 2.x uses us precision by default; older used ns. Accept either.
+    dtype_str = str(df["signal_time"].dtype)
+    assert pd.api.types.is_datetime64_any_dtype(df["signal_time"]) and "UTC" in dtype_str
 
 
 def test_kelly_table_single_bin_all_winners_at_max_cap():
