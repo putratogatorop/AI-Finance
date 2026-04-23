@@ -771,6 +771,13 @@ def main() -> None:
     candles, universe = load_snapshot(SNAPSHOT_DATE)
     print(f"[bigmover] candles: {len(candles):,} rows, universe: {len(universe)} pairs")
 
+    # Normalize timestamps to epoch seconds (int64) once — the rest of the
+    # script (compute_oot_split, compute_big_mover_coverage, simulate_portfolio)
+    # all expect int-seconds timestamps.
+    if pd.api.types.is_datetime64_any_dtype(candles["timestamp"]):
+        candles = candles.copy()
+        candles["timestamp"] = candles["timestamp"].astype("int64") // 10**9
+
     universe_assets = apply_universe_filter(universe)
     print(f"[bigmover] tradable universe: {len(universe_assets)} pairs")
 
