@@ -229,8 +229,11 @@ def monte_carlo_pf(
 ) -> tuple[float, float, float]:
     """Bootstrap PF distribution by resampling trade order with replacement.
 
-    Returns (p5, p50, p95) of PF across `iters` bootstrap samples.
-    PF is inf when a sample has no losers.
+    Returns (p5, p50, p95) of PF across `iters` bootstrap samples. Samples
+    with no losers contribute PF=inf, which sorts to the tail and therefore
+    participates in p50/p95 (a strategy whose bootstraps frequently land
+    no-loss IS robust — that signal should not be masked). p5 stays finite
+    when <5% of samples are no-loss, which is what we actually gate on.
     """
     rng = np.random.default_rng(seed)
     n = len(pnls)
@@ -245,11 +248,6 @@ def monte_carlo_pf(
             pfs[i] = np.inf
         else:
             pfs[i] = wins.sum() / abs(losses.sum())
-    # Quantiles ignore inf by masking
-    finite = pfs[np.isfinite(pfs)]
-    if len(finite) == 0:
-        return float("inf"), float("inf"), float("inf")
-    # Use all pfs for quantile (inf participates via sorting), but represent inf cleanly
     pfs_sorted = np.sort(pfs)
     p5 = pfs_sorted[int(0.05 * iters)]
     p50 = pfs_sorted[int(0.50 * iters)]
