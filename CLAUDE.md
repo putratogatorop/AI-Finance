@@ -68,3 +68,12 @@ Every change must be recorded in git — no ad-hoc edits on the VPS, no "quick f
 - **Rollback = `git checkout <previous-commit>` + redeploy**, not manual file surgery.
 
 If a hotfix is ever needed directly on the VPS (emergency only), commit it back to a branch immediately and open a PR — nothing stays off-git.
+
+## Trading Rules
+
+- **Direction**: shorts only until long edge is proven via backtest. Long-side momentum entries failed ship gate 2026-04-23 (PF 0.819).
+- **Per-coin HTF downtrend filter**: TBD by 24-variant backtest grid (`backtest_short_grid_v1`). Status will be set to "required" or "rejected" once grid runs.
+- **Risk per trade**: hard `5% SL`. Aim ≥ `3:1 R:R` (`15% TP` baseline).
+- **Sizing**: `5% of equity` per trade, `5x leverage` default → 25% notional per trade. `MAX_CONCURRENT_POSITIONS = 5` → ≤ 125% gross notional.
+- **Realistic PF floor for ship**: `1.30` over `1000+` trades. The 100%/month return target is aspirational, NOT an engineering spec. Realistic monthly: 20-40% in good months, drawdowns are normal.
+- **Backtest-before-deploy is non-negotiable**: any new scanner / exit / param change cites a `results/<run_id>/metrics.json` in its deploy PR.
