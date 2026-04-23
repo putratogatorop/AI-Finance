@@ -253,7 +253,10 @@ def build_run_id(script_path: str | Path) -> str:
 def apply_universe_filter(universe_df: pd.DataFrame) -> set[str]:
     """Top N by quote_volume_24h, exclude leveraged + delisting + low-volume.
 
-    Returns set of asset names (without _USDT suffix) — e.g., {"BTC", "ETH", ...}.
+    Returns set of asset names in CANDLES FORMAT (e.g., "BTCUSDT", not "BTC").
+    Candles table uses underscore-stripped symbol; universe table uses
+    "BTC_USDT" style with separate "asset" column for "BTC". We must align
+    to the candles format.
     """
     leveraged_re = re.compile(LEVERAGED_TOKEN_RE)
     df = universe_df[
@@ -262,7 +265,8 @@ def apply_universe_filter(universe_df: pd.DataFrame) -> set[str]:
         & (universe_df["quote_volume_24h"].fillna(0) >= MIN_QUOTE_VOL_24H)
     ].copy()
     df = df.sort_values("quote_volume_24h", ascending=False).head(TOP_N)
-    return set(df["asset"].tolist())
+    # Convert "BTC_USDT" -> "BTCUSDT" to match candles["asset"]
+    return set(df["symbol"].str.replace("_", "", regex=False).tolist())
 
 
 def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
@@ -661,12 +665,8 @@ def main() -> None:
     print(f"[grid] HTF computed for {len(htf_by_asset)} assets")
 
     # Read snapshot shas from MANIFEST for write_results
-    manifest_text = (Path("data/snapshots") / "MANIFEST.md").read_text()
-    if not manifest_text:
-        # try repo root resolution
-        manifest_text = (
-            Path(__file__).resolve().parents[3] / "data" / "snapshots" / "MANIFEST.md"
-        ).read_text()
+    manifest_path = Path(__file__).resolve().parents[3] / "data" / "snapshots" / "MANIFEST.md"
+    manifest_text = manifest_path.read_text()
     candles_sha, universe_sha = _parse_manifest_row(manifest_text, SNAPSHOT_DATE)
 
     summary_rows: list[dict] = []
