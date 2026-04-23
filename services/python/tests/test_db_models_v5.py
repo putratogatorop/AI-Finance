@@ -1,9 +1,12 @@
 import sys
+
 sys.path.insert(0, ".")
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
 from src.db.models import Base, ContractStats1h, FearGreedIndex
 
 

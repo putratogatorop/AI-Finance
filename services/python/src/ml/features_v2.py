@@ -136,7 +136,7 @@ class FeatureEngineerV2:
         # 8. MICROSTRUCTURE (from OHLCV)
         # ═══════════════════════════════════════════
         bar_range = high - low
-        body = (close - open_).abs()
+        _body = (close - open_).abs()
 
         # Close location value: where close sits in the bar
         out["clv"] = (2 * close - high - low) / bar_range.replace(0, np.nan)

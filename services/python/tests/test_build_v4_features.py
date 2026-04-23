@@ -1,8 +1,9 @@
 import sys
+
 sys.path.insert(0, ".")
 
-import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+
 from src.db.models import Base
 
 

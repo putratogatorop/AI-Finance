@@ -114,7 +114,9 @@ class AssetPrice15m(Base):
 
 class FundingRate(Base):
     __tablename__ = "funding_rates"
-    __table_args__ = (UniqueConstraint("asset", "timestamp", "source", name="uq_funding_asset_ts_src"),)
+    __table_args__ = (
+        UniqueConstraint("asset", "timestamp", "source", name="uq_funding_asset_ts_src"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     asset: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
@@ -158,7 +160,9 @@ class VolumeBreakout(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     timeframe: Mapped[str] = mapped_column(String(4), nullable=False, index=True)
-    signal_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    signal_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     # Breakout bar OHLCV
     open: Mapped[float] = mapped_column(Float, nullable=False)

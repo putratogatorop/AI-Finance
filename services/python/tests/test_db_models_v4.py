@@ -1,7 +1,9 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from src.db.models import Base, AssetPrice15m, FundingRate
+
+from src.db.models import AssetPrice15m, Base, FundingRate
 
 
 def make_engine():

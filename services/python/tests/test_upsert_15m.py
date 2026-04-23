@@ -1,9 +1,12 @@
 import sys
+
 sys.path.insert(0, ".")
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
 from sqlalchemy import create_engine, text
-from src.db.models import Base, AssetPrice15m
+
+from src.db.models import Base
 
 
 def make_pg_engine():

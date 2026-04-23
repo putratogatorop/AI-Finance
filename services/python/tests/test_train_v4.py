@@ -1,9 +1,9 @@
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def make_fake_features(n: int = 5000) -> pd.DataFrame:
@@ -34,7 +34,7 @@ def make_fake_features(n: int = 5000) -> pd.DataFrame:
 
 
 def test_train_one_fold():
-    from scripts.train_v4 import train_one_fold, FEATURE_COLS, LGB_PARAMS
+    from scripts.train_v4 import FEATURE_COLS, LGB_PARAMS, train_one_fold
 
     df = make_fake_features(5000)
     X = df[FEATURE_COLS].values
@@ -55,7 +55,7 @@ def test_train_one_fold():
 
 
 def test_conviction_range():
-    from scripts.train_v4 import train_one_fold, FEATURE_COLS, LGB_PARAMS
+    from scripts.train_v4 import FEATURE_COLS, LGB_PARAMS, train_one_fold
 
     df = make_fake_features(5000)
     X = df[FEATURE_COLS].values

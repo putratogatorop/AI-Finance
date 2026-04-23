@@ -1,4 +1,5 @@
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
@@ -126,7 +127,7 @@ def test_time_features():
 
 
 def test_feature_count():
-    from src.ml.features_v3 import compute_ohlcv_features, OHLCV_FEATURE_COLS
+    from src.ml.features_v3 import OHLCV_FEATURE_COLS, compute_ohlcv_features
 
     df = make_ohlcv(800)
     result = compute_ohlcv_features(df)

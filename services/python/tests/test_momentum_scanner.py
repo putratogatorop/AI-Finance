@@ -1,10 +1,10 @@
 # tests/test_momentum_scanner.py
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def make_coin_data(n: int = 200, seed: int = 42) -> pd.DataFrame:
