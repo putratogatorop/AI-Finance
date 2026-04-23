@@ -12,7 +12,6 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
       - name: Enable auto-merge
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
