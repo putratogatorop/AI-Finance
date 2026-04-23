@@ -287,6 +287,35 @@ def threshold_kelly_crosscheck(
     return pd.DataFrame(rows)
 
 
+def load_trades(engine) -> pd.DataFrame:
+    """Load ML-filtered trades from DB and validate schema.
+
+    Expected columns (at minimum): signal_time, ml_prob, pnl_pct, bars_held.
+    Drops rows with NaN in any required column. Sorts by signal_time.
+    """
+    required = ["signal_time", "ml_prob", "pnl_pct", "bars_held"]
+    sql = f"SELECT {', '.join(required)} FROM {SOURCE_TABLE} ORDER BY signal_time"
+    df = pd.read_sql(sql, engine)
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise RuntimeError(f"{SOURCE_TABLE} missing required columns: {missing}")
+    df["signal_time"] = pd.to_datetime(df["signal_time"], utc=True)
+    before = len(df)
+    df = df.dropna(subset=required).reset_index(drop=True)
+    if len(df) < before:
+        print(f"  dropped {before - len(df)} rows with NaN in required columns")
+    return df
+
+
+def _split_oot(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split into (pre_oot, oot) using last HOLD_OUT_MONTHS calendar months."""
+    max_date = df["signal_time"].max()
+    oot_start = (max_date - pd.DateOffset(months=HOLD_OUT_MONTHS)).floor("D")
+    pre = df[df["signal_time"] < oot_start].reset_index(drop=True)
+    oot = df[df["signal_time"] >= oot_start].reset_index(drop=True)
+    return pre, oot
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 
