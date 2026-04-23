@@ -255,6 +255,38 @@ def monte_carlo_pf(
     return float(p5), float(p50), float(p95)
 
 
+def threshold_kelly_crosscheck(
+    trades_df: pd.DataFrame,
+    kelly_table: pd.DataFrame,
+    thresholds: list[float] = CROSSCHECK_THRESHOLDS,
+) -> pd.DataFrame:
+    """For each threshold, re-run scenarios A, B, C and collect total_return_pct.
+
+    Scenario A uses flat sizing (f=BASELINE_EQUITY_FRACTION for every bin);
+    B and C use the provided kelly_table.
+
+    Returns DataFrame with columns: threshold, A_trades, A_ret_pct, B_ret_pct, C_ret_pct.
+    """
+    flat_tbl = pd.DataFrame([
+        {"bin_low": lo, "bin_high": hi, "f_capped": BASELINE_EQUITY_FRACTION}
+        for lo, hi in zip(KELLY_BIN_EDGES[:-1], KELLY_BIN_EDGES[1:], strict=False)
+    ])
+    rows = []
+    for th in thresholds:
+        sub = trades_df[trades_df["ml_prob"] >= th].copy()
+        _, m_a = simulate(sub, flat_tbl, max_concurrent=MAX_CONCURRENT_A, label=f"A_th{th}")
+        _, m_b = simulate(sub, kelly_table, max_concurrent=MAX_CONCURRENT_B, label=f"B_th{th}")
+        _, m_c = simulate(sub, kelly_table, max_concurrent=MAX_CONCURRENT_C, label=f"C_th{th}")
+        rows.append({
+            "threshold": th,
+            "A_trades": m_a["trades"],
+            "A_ret_pct": m_a["total_return_pct"],
+            "B_ret_pct": m_b["total_return_pct"],
+            "C_ret_pct": m_c["total_return_pct"],
+        })
+    return pd.DataFrame(rows)
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 

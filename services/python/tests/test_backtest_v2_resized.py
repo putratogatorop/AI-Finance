@@ -208,3 +208,25 @@ def test_monte_carlo_pf_quantile_order():
     # Filter out inf cases for ordering assertion
     if p95 != float("inf"):
         assert p5 <= p50 <= p95
+
+
+from backtest_v2_resized import threshold_kelly_crosscheck  # noqa: E402
+
+
+def test_threshold_kelly_crosscheck_returns_row_per_threshold():
+    rows = [
+        ("2025-06-01T00:00:00Z", 0.72, 0.03, 20),
+        ("2025-06-01T10:00:00Z", 0.82, 0.04, 20),
+        ("2025-06-02T00:00:00Z", 0.92, 0.05, 20),
+    ]
+    df = _make_trades(rows)
+    flat_tbl = pd.DataFrame([
+        {"bin_low": lo, "bin_high": hi, "f_capped": 0.05}
+        for lo, hi in zip([0.70, 0.75, 0.80, 0.85, 0.90], [0.75, 0.80, 0.85, 0.90, 1.01])
+    ])
+    cc = threshold_kelly_crosscheck(df, flat_tbl, thresholds=[0.70, 0.80, 0.90])
+    assert list(cc["threshold"]) == [0.70, 0.80, 0.90]
+    assert set(cc.columns) >= {"threshold", "A_trades", "A_ret_pct", "B_ret_pct", "C_ret_pct"}
+    # At threshold 0.70 all 3 trades pass; at 0.90 only one.
+    assert cc.iloc[0]["A_trades"] == 3
+    assert cc.iloc[2]["A_trades"] == 1
