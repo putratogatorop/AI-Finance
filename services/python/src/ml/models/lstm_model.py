@@ -7,7 +7,7 @@ Includes feature scaling (StandardScaler) as part of the pipeline.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, cast
 
 import joblib
 import numpy as np
@@ -46,7 +46,7 @@ class _LSTMNetwork(nn.Module):
         lstm_out, _ = self.lstm(x)
         # Use output of last timestep
         last_hidden = lstm_out[:, -1, :]
-        return self.fc(last_hidden)
+        return cast(torch.Tensor, self.fc(last_hidden))
 
 
 class LSTMModel(BaseModel):
@@ -73,8 +73,8 @@ class LSTMModel(BaseModel):
         self._patience = patience
 
         self._network: _LSTMNetwork | None = None
-        self._scaler_mean: np.ndarray | None = None
-        self._scaler_std: np.ndarray | None = None
+        self._scaler_mean: np.ndarray[Any, np.dtype[Any]] | None = None
+        self._scaler_std: np.ndarray[Any, np.dtype[Any]] | None = None
         self._n_features: int = 0
         self._device = torch.device("cpu")
 
@@ -83,8 +83,10 @@ class LSTMModel(BaseModel):
         return "lstm"
 
     def _create_sequences(
-        self, X: np.ndarray, y: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray | None]:
+        self,
+        X: np.ndarray[Any, np.dtype[Any]],
+        y: np.ndarray[Any, np.dtype[Any]] | None = None,
+    ) -> tuple[np.ndarray[Any, np.dtype[Any]], np.ndarray[Any, np.dtype[Any]] | None]:
         """Create sliding window sequences from time-series data."""
         n = len(X)
         seq_len = self._sequence_length
@@ -94,7 +96,7 @@ class LSTMModel(BaseModel):
             )
 
         X_seqs = []
-        y_seqs: list[np.ndarray] | None = [] if y is not None else None
+        y_seqs: list[np.ndarray[Any, np.dtype[Any]]] | None = [] if y is not None else None
 
         for i in range(n - seq_len + 1):
             X_seqs.append(X[i : i + seq_len])
@@ -105,22 +107,25 @@ class LSTMModel(BaseModel):
         y_out = (
             np.array(y_seqs, dtype=np.float32) if y_seqs is not None else None
         )
-        return X_out, y_out
+        return (
+            cast(np.ndarray[Any, np.dtype[Any]], X_out),
+            cast(np.ndarray[Any, np.dtype[Any]], y_out) if y_out is not None else None,
+        )
 
-    def _fit_scaler(self, X: pd.DataFrame) -> np.ndarray:
+    def _fit_scaler(self, X: pd.DataFrame) -> np.ndarray[Any, np.dtype[Any]]:
         """Fit and apply standard scaling."""
         values = X.values.astype(np.float32)
         self._scaler_mean = values.mean(axis=0)
         self._scaler_std = values.std(axis=0)
         self._scaler_std[self._scaler_std == 0] = 1.0
-        return (values - self._scaler_mean) / self._scaler_std
+        return cast(np.ndarray[Any, np.dtype[Any]], (values - self._scaler_mean) / self._scaler_std)
 
-    def _apply_scaler(self, X: pd.DataFrame) -> np.ndarray:
+    def _apply_scaler(self, X: pd.DataFrame) -> np.ndarray[Any, np.dtype[Any]]:
         """Apply previously fit scaling."""
         if self._scaler_mean is None or self._scaler_std is None:
             raise RuntimeError("Scaler not fitted. Call train() first.")
         values = X.values.astype(np.float32)
-        return (values - self._scaler_mean) / self._scaler_std
+        return cast(np.ndarray[Any, np.dtype[Any]], (values - self._scaler_mean) / self._scaler_std)
 
     def train(
         self,
@@ -160,7 +165,7 @@ class LSTMModel(BaseModel):
         )
 
         # Validation data
-        val_loader: DataLoader | None = None
+        val_loader: DataLoader[Any] | None = None
         if X_val is not None and y_val is not None:
             X_val_scaled = self._apply_scaler(X_val)
             y_val_arr = y_val[self.TARGET_COLUMNS].values.astype(np.float32)

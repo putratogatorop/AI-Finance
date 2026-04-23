@@ -1,9 +1,9 @@
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def make_fake_features(n: int = 5000) -> pd.DataFrame:
@@ -32,7 +32,7 @@ def make_fake_features(n: int = 5000) -> pd.DataFrame:
 
 
 def test_train_one_fold_binary():
-    from scripts.train_v4_1 import train_one_fold_binary, FEATURE_COLS, BINARY_PARAMS
+    from scripts.train_v4_1 import BINARY_PARAMS, FEATURE_COLS, train_one_fold_binary
 
     df = make_fake_features(5000)
     X = df[FEATURE_COLS].values
@@ -59,7 +59,7 @@ def test_train_one_fold_binary():
 
 
 def test_conviction_correlation_with_returns():
-    from scripts.train_v4_1 import train_one_fold_binary, FEATURE_COLS, BINARY_PARAMS
+    from scripts.train_v4_1 import BINARY_PARAMS, FEATURE_COLS, train_one_fold_binary
 
     df = make_fake_features(5000)
     X = df[FEATURE_COLS].values
@@ -76,9 +76,11 @@ def test_conviction_correlation_with_returns():
     actuals = np.array(result["actuals"])
 
     high_long = conv > np.percentile(conv, 90)
-    high_short = conv < np.percentile(conv, 10)
+    _high_short = conv < np.percentile(conv, 10)
 
     if high_long.sum() > 0:
         long_rate_high = (actuals[high_long] == 2).mean()
         long_rate_all = (actuals == 2).mean()
-        print(f"LONG rate in top 10% conviction: {long_rate_high:.3f} vs overall: {long_rate_all:.3f}")
+        print(
+            f"LONG rate in top 10% conviction: {long_rate_high:.3f} vs overall: {long_rate_all:.3f}"
+        )

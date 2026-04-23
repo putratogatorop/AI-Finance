@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from pycoingecko import CoinGeckoAPI
 
@@ -23,7 +24,7 @@ class CoinGeckoClient:
     def id_to_asset(self, cg_id: str) -> str:
         return ID_TO_SYMBOL.get(cg_id, cg_id.upper())
 
-    def parse_market_data(self, raw: dict) -> dict:
+    def parse_market_data(self, raw: dict[str, Any]) -> dict[str, Any]:
         symbol = self.id_to_asset(raw["id"])
         return {
             "asset": symbol,
@@ -41,7 +42,7 @@ class CoinGeckoClient:
         )
         return [self.id_to_asset(coin["id"]) for coin in markets]
 
-    def fetch_fundamentals(self, assets: list[str]) -> list[dict]:
+    def fetch_fundamentals(self, assets: list[str]) -> list[dict[str, Any]]:
         ids = [self.asset_to_id(a) for a in assets]
         ids_str = ",".join(ids)
         markets = self.cg.get_coins_markets(

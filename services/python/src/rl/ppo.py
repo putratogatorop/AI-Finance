@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 from torch.optim import Adam
@@ -32,7 +34,7 @@ class PPOBuffer:
         self.values.append(value)
         self.dones.append(done)
 
-    def get(self, gamma: float = 0.99, lam: float = 0.95) -> dict:
+    def get(self, gamma: float = 0.99, lam: float = 0.95) -> dict[str, Any]:
         """Compute GAE advantages and return a batch dict.
 
         Returns dict with keys: obs, actions, old_log_probs, returns, advantages.
@@ -83,7 +85,7 @@ class PPOBuffer:
 
 def ppo_update(
     agent: LSTMPPOAgent,
-    batch: dict,
+    batch: dict[str, Any],
     epochs: int = 4,
     batch_size: int = 64,
     lr: float = 3e-4,

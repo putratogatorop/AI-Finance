@@ -1,9 +1,8 @@
 import csv
 import io
-import zipfile
-from unittest.mock import patch, MagicMock
-
 import sys
+import zipfile
+
 sys.path.insert(0, ".")
 
 
@@ -22,7 +21,10 @@ def make_fake_zip(rows: list[list[str]]) -> bytes:
 def test_parse_binance_csv():
     from scripts.backfill_binance_15m import parse_binance_csv
 
-    raw = "1704067200000,42000.0,42100.0,41900.0,42050.0,123.45,1704068099999,5180000.0,1500,60.0,2520000.0,0\n"
+    raw = (
+        "1704067200000,42000.0,42100.0,41900.0,42050.0,123.45,"
+        "1704068099999,5180000.0,1500,60.0,2520000.0,0\n"
+    )
     rows = parse_binance_csv(raw)
     assert len(rows) == 1
     assert rows[0]["open"] == 42000.0

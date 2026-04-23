@@ -7,6 +7,7 @@ Uses early stopping on validation set when provided.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import joblib
 import numpy as np
@@ -82,7 +83,7 @@ class XGBoostModel(BaseModel):
             label = f"{horizon_days}d"
             reg = self._make_regressor()
 
-            fit_params: dict = {}
+            fit_params: dict[str, Any] = {}
             if X_val is not None and y_val is not None:
                 fit_params["eval_set"] = [(X_val, y_val[target_col])]
                 fit_params["verbose"] = False

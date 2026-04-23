@@ -1,10 +1,10 @@
 # tests/test_build_v4_2.py
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def test_resample_15m_to_1h():
@@ -44,7 +44,7 @@ def test_resample_15m_to_1h():
 
 
 def test_compute_1h_features():
-    from scripts.build_v4_2_features import compute_1h_features, FEATURE_COLS_1H
+    from scripts.build_v4_2_features import FEATURE_COLS_1H, compute_1h_features
 
     n = 200  # 200 hourly bars (~8 days)
     ts = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_settings() -> Settings:
-    return Settings()
+    return Settings.model_validate({})
 
 
 def main() -> None:
@@ -62,7 +62,7 @@ def main() -> None:
 
     shutdown_event = threading.Event()
 
-    def handle_signal(signum, frame):
+    def handle_signal(signum: int, frame: object) -> None:
         logger.info("Received shutdown signal")
         shutdown_event.set()
 

@@ -1,9 +1,9 @@
 # tests/test_backfill_contract_stats.py
 import sys
+
 sys.path.insert(0, ".")
 
-from datetime import datetime, UTC
-
+from datetime import datetime
 
 SAMPLE_RESPONSE = [
     {
@@ -39,9 +39,10 @@ def test_parse_contract_stats():
 
 
 def test_aggregate_to_1h():
-    from scripts.backfill_contract_stats import aggregate_5min_to_1h
-    import pandas as pd
     import numpy as np
+    import pandas as pd
+
+    from scripts.backfill_contract_stats import aggregate_5min_to_1h
 
     # 12 records = 1 hour of 5-min data
     ts = pd.date_range("2024-06-01 00:00", periods=12, freq="5min", tz="UTC")

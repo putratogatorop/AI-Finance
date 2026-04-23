@@ -1,5 +1,6 @@
 """Shared DB config — reads DATABASE_URL env var with local-dev fallback."""
 import os
+from typing import Any
 from urllib.parse import urlparse
 
 DB_URL = os.environ.get(
@@ -8,7 +9,7 @@ DB_URL = os.environ.get(
 )
 
 
-def get_db_conn_kwargs() -> dict:
+def get_db_conn_kwargs() -> dict[str, Any]:
     """psycopg2.connect(**kwargs) style dict parsed from DB_URL."""
     p = urlparse(DB_URL)
     return dict(

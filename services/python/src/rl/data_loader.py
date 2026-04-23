@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -93,7 +94,7 @@ class RLDataLoader:
 
     # ── Public API ───────────────────────────────────────────────
 
-    def build_dataset(self) -> dict:
+    def build_dataset(self) -> dict[str, Any]:
         """Build complete RL dataset from raw CSVs.
 
         Returns
@@ -125,8 +126,8 @@ class RLDataLoader:
         logger.info("Processing %d alt candidates", len(alt_symbols))
 
         fe = FeatureEngineerV2()
-        alt_feature_arrays: list[np.ndarray] = []
-        alt_price_arrays: list[np.ndarray] = []
+        alt_feature_arrays: list[np.ndarray[Any, np.dtype[Any]]] = []
+        alt_price_arrays: list[np.ndarray[Any, np.dtype[Any]]] = []
         alt_names: list[str] = []
         min_len = len(common_ts)
 
@@ -158,7 +159,9 @@ class RLDataLoader:
 
             # Skip alts that lost too many rows to feature warmup
             if n_feat < 3000:
-                logger.debug("Skipping %s — only %d rows after features (need 3000+)", symbol, n_feat)
+                logger.debug(
+                    "Skipping %s — only %d rows after features (need 3000+)", symbol, n_feat
+                )
                 continue
 
             alt_feature_arrays.append(combined.values)

@@ -1,8 +1,8 @@
 import sys
+
 sys.path.insert(0, ".")
 
-from datetime import datetime, UTC
-
+from datetime import datetime
 
 SAMPLE_GATEIO_RESPONSE = [
     {"t": 1704067200, "r": "0.000100", "T": "1704067200"},

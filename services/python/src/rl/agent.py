@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import torch
 import torch.nn as nn
+from torch import Tensor
 from torch.distributions import Normal
 
 
@@ -47,8 +50,8 @@ class LSTMPPOAgent(nn.Module):
         )
 
         # Initialize output layer with small weights to prevent Tanh saturation
-        nn.init.uniform_(self.actor_mean[-2].weight, -0.003, 0.003)
-        nn.init.zeros_(self.actor_mean[-2].bias)
+        nn.init.uniform_(cast(Tensor, self.actor_mean[-2].weight), -0.003, 0.003)
+        nn.init.zeros_(cast(Tensor, self.actor_mean[-2].bias))
 
         # Learnable log standard deviation
         self.actor_log_std = nn.Parameter(
@@ -86,15 +89,15 @@ class LSTMPPOAgent(nn.Module):
             obs = obs.unsqueeze(1)
 
         lstm_out, self.hidden = self.lstm(obs, self.hidden)
-        return lstm_out[:, -1, :]
+        return cast(Tensor, lstm_out[:, -1, :])
 
     # ------------------------------------------------------------------
     @torch.no_grad()
     def act(
         self,
-        obs: np.ndarray,
+        obs: np.ndarray[Any, np.dtype[Any]],
         deterministic: bool = False,
-    ) -> tuple[np.ndarray, float, float]:
+    ) -> tuple[np.ndarray[Any, np.dtype[Any]], float, float]:
         """Select an action given a single observation.
 
         Returns:
@@ -112,14 +115,14 @@ class LSTMPPOAgent(nn.Module):
             nan=0.01,
         ).clamp(min=0.01)
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
-        dist = Normal(action_mean, action_std)
+        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call,unused-ignore]
 
         if deterministic:
             action = action_mean
         else:
-            action = dist.sample()
+            action = dist.sample()  # type: ignore[no-untyped-call]
 
-        log_prob = dist.log_prob(action).sum().item()
+        log_prob = dist.log_prob(action).sum().item()  # type: ignore[no-untyped-call]
         value = self.critic(h).squeeze().item()
 
         # Clamp outputs per triple (score, sl, tp)
@@ -161,11 +164,11 @@ class LSTMPPOAgent(nn.Module):
         ).clamp(min=0.01)
         # Guard against NaN from Tanh saturation
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
-        dist = Normal(action_mean, action_std)
+        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call,unused-ignore]
 
-        log_probs = dist.log_prob(action_batch).sum(dim=-1)  # (batch,)
+        log_probs = dist.log_prob(action_batch).sum(dim=-1)  # type: ignore[no-untyped-call]  # (batch,)
         values = self.critic(h).squeeze(-1)                   # (batch,)
-        entropy = dist.entropy().mean()                        # scalar
+        entropy = dist.entropy().mean()  # type: ignore[no-untyped-call]  # scalar
 
         # Restore hidden
         self.hidden = saved_hidden

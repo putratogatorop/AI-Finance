@@ -1,9 +1,9 @@
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def make_trades_df(n: int = 200, seed: int = 42) -> pd.DataFrame:
@@ -73,10 +73,14 @@ def test_stop_loss_triggers():
 def test_compute_metrics():
     from src.ml.backtester_v4 import compute_metrics
     trades = [
-        {"pnl_pct": 0.02, "hold_bars": 16, "fee_paid": 0.3, "funding_paid": 0, "raw_return": 0.02, "position_size": 1000},
-        {"pnl_pct": -0.01, "hold_bars": 8, "fee_paid": 0.3, "funding_paid": 0, "raw_return": -0.01, "position_size": 1000},
-        {"pnl_pct": 0.03, "hold_bars": 32, "fee_paid": 0.3, "funding_paid": 0, "raw_return": 0.03, "position_size": 1000},
-        {"pnl_pct": 0.015, "hold_bars": 12, "fee_paid": 0.3, "funding_paid": 0, "raw_return": 0.015, "position_size": 1000},
+        {"pnl_pct": 0.02, "hold_bars": 16, "fee_paid": 0.3, "funding_paid": 0,
+         "raw_return": 0.02, "position_size": 1000},
+        {"pnl_pct": -0.01, "hold_bars": 8, "fee_paid": 0.3, "funding_paid": 0,
+         "raw_return": -0.01, "position_size": 1000},
+        {"pnl_pct": 0.03, "hold_bars": 32, "fee_paid": 0.3, "funding_paid": 0,
+         "raw_return": 0.03, "position_size": 1000},
+        {"pnl_pct": 0.015, "hold_bars": 12, "fee_paid": 0.3, "funding_paid": 0,
+         "raw_return": 0.015, "position_size": 1000},
     ]
     equity = pd.Series([10000, 10200, 10100, 10400, 10550])
     m = compute_metrics(trades, equity)

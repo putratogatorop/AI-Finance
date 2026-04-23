@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -389,7 +389,7 @@ class BacktestEngine:
             return []
         values = np.array(portfolio_values)
         returns = np.diff(values) / values[:-1]
-        return returns.tolist()
+        return cast(list[float], returns.tolist())
 
     def _compute_max_drawdown(self, portfolio_values: list[float]) -> float:
         if not portfolio_values:

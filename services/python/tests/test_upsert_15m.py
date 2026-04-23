@@ -1,9 +1,14 @@
 import sys
+
 sys.path.insert(0, ".")
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
+import pytest
 from sqlalchemy import create_engine, text
-from src.db.models import Base, AssetPrice15m
+from sqlalchemy.exc import OperationalError
+
+from src.db.models import Base
 
 
 def make_pg_engine():
@@ -17,7 +22,10 @@ def make_pg_engine():
 def test_upsert_15m_batch():
     from scripts.upsert_15m_to_pg import upsert_15m_batch
 
-    engine = make_pg_engine()
+    try:
+        engine = make_pg_engine()
+    except OperationalError as e:
+        pytest.skip(f"Postgres not reachable in this env: {e}")
 
     # Clean slate
     with engine.begin() as conn:
