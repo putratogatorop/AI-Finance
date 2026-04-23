@@ -1,0 +1,37 @@
+{
+  "avg_pnl_pct": 0.01435483870967745,
+  "avg_winner_pct": 0.15,
+  "by_direction": {
+    "long": {
+      "avg_pnl_pct": 0.0,
+      "median_hold_bars": 0.0,
+      "pf": 0.0,
+      "total_pnl_pct": 0.0,
+      "trades": 0,
+      "wr": 0.0
+    },
+    "short": {
+      "avg_pnl_pct": 0.01435483870967745,
+      "median_hold_bars": 67.0,
+      "pf": 1.735537190082647,
+      "total_pnl_pct": 0.44500000000000095,
+      "trades": 31,
+      "wr": 0.22580645161290322
+    }
+  },
+  "final_equity_usd": 120.39000000000006,
+  "max_drawdown_pct": -17.665162084530145,
+  "median_hold_bars": 67.0,
+  "median_winner_pct": 0.15000000000000002,
+  "n_detected_in_snapshot": 9594,
+  "n_matched_to_db": 1068,
+  "pf": 1.735537190082647,
+  "pf_p5": 0.6282051282051291,
+  "pf_p50": 1.735537190082647,
+  "pf_p95": 3.896103896103902,
+  "sharpe": 0.9496902039901954,
+  "total_pnl_pct": 0.44500000000000095,
+  "total_return_pct": 20.390000000000057,
+  "trades": 31,
+  "wr": 0.22580645161290322
+}

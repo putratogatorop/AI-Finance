@@ -1,0 +1,35 @@
+{
+  "COOLDOWN_BARS": 96,
+  "HOLD_OUT_MONTHS": 3,
+  "KELLY_BIN_EDGES": [
+    0.6,
+    0.65,
+    0.7,
+    0.75,
+    0.8,
+    0.85,
+    0.9,
+    1.01
+  ],
+  "KELLY_FRACTION_CAP": 0.15,
+  "KELLY_FRACTION_FLOOR": 0.02,
+  "LEVERAGE": 5,
+  "MAX_CONCURRENT_POSITIONS": 5,
+  "MAX_HOLD_BARS": 192,
+  "PRICE_MOVE_THRESH": 0.05,
+  "ROUND_TRIP_FEE": 0.0012,
+  "SNAPSHOT_DATE": "2026-04-24",
+  "START_EQUITY_USD": 100.0,
+  "VOL_SPIKE": 3.0,
+  "exit": "trail_3",
+  "exit_params": {
+    "sl_pct": 0.05,
+    "tp_pct": null,
+    "trail_activation": 0.02,
+    "trail_pct": 0.03
+  },
+  "ml_threshold": 0.65,
+  "oot_start_ts": 1769153400,
+  "signal": "multi_bar_confirm",
+  "sizing": "kelly_cap15"
+}
