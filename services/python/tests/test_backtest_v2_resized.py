@@ -4,13 +4,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from backtest_v2_resized import _kelly_fraction_for, build_kelly_table, simulate  # noqa: E402
+from backtest_v2_resized import (  # noqa: E402
+    _kelly_fraction_for,
+    build_kelly_table,
+    monte_carlo_pf,
+    simulate,
+)
 
 
 def _make_trades(rows):
@@ -176,3 +182,29 @@ def test_simulate_kelly_fractions_scale_notional():
     assert ledger.iloc[0]["notional_usd"] == pytest.approx(60.0)
     assert ledger.iloc[1]["notional_usd"] == pytest.approx(300.0)
     assert ledger.iloc[1]["pnl_usd"] == pytest.approx(8.64, abs=0.01)
+
+
+def test_monte_carlo_pf_reproducible_with_seed():
+    pnls = np.array([0.03, -0.01, 0.04, -0.01, 0.02, -0.01])
+    p5_a, p50_a, p95_a = monte_carlo_pf(pnls, iters=100, seed=42)
+    p5_b, p50_b, p95_b = monte_carlo_pf(pnls, iters=100, seed=42)
+    assert p5_a == p5_b
+    assert p50_a == p50_b
+    assert p95_a == p95_b
+
+
+def test_monte_carlo_pf_all_winners_returns_inf():
+    pnls = np.array([0.01, 0.02, 0.03, 0.04])
+    p5, p50, p95 = monte_carlo_pf(pnls, iters=50, seed=42)
+    # No losers in any bootstrap sample -> inf
+    assert p5 == float("inf")
+    assert p50 == float("inf")
+
+
+def test_monte_carlo_pf_quantile_order():
+    """p5 <= p50 <= p95 always."""
+    pnls = np.array([0.03, -0.01, 0.04, -0.01, 0.02, -0.01, 0.05, -0.02])
+    p5, p50, p95 = monte_carlo_pf(pnls, iters=500, seed=42)
+    # Filter out inf cases for ordering assertion
+    if p95 != float("inf"):
+        assert p5 <= p50 <= p95

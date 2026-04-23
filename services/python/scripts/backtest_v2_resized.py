@@ -224,6 +224,39 @@ def simulate(
     return ledger, metrics
 
 
+def monte_carlo_pf(
+    pnls: np.ndarray, iters: int = MC_ITER, seed: int = MC_SEED
+) -> tuple[float, float, float]:
+    """Bootstrap PF distribution by resampling trade order with replacement.
+
+    Returns (p5, p50, p95) of PF across `iters` bootstrap samples.
+    PF is inf when a sample has no losers.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(pnls)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    pfs = np.empty(iters, dtype=np.float64)
+    for i in range(iters):
+        sample = pnls[rng.integers(0, n, size=n)]
+        wins = sample[sample > 0]
+        losses = sample[sample <= 0]
+        if len(losses) == 0 or losses.sum() == 0:
+            pfs[i] = np.inf
+        else:
+            pfs[i] = wins.sum() / abs(losses.sum())
+    # Quantiles ignore inf by masking
+    finite = pfs[np.isfinite(pfs)]
+    if len(finite) == 0:
+        return float("inf"), float("inf"), float("inf")
+    # Use all pfs for quantile (inf participates via sorting), but represent inf cleanly
+    pfs_sorted = np.sort(pfs)
+    p5 = pfs_sorted[int(0.05 * iters)]
+    p50 = pfs_sorted[int(0.50 * iters)]
+    p95 = pfs_sorted[int(0.95 * iters)]
+    return float(p5), float(p50), float(p95)
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 
