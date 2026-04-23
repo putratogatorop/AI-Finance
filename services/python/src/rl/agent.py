@@ -50,8 +50,8 @@ class LSTMPPOAgent(nn.Module):
         )
 
         # Initialize output layer with small weights to prevent Tanh saturation
-        nn.init.uniform_(self.actor_mean[-2].weight, -0.003, 0.003)
-        nn.init.zeros_(self.actor_mean[-2].bias)
+        nn.init.uniform_(cast(Tensor, self.actor_mean[-2].weight), -0.003, 0.003)
+        nn.init.zeros_(cast(Tensor, self.actor_mean[-2].bias))
 
         # Learnable log standard deviation
         self.actor_log_std = nn.Parameter(
@@ -115,7 +115,7 @@ class LSTMPPOAgent(nn.Module):
             nan=0.01,
         ).clamp(min=0.01)
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
-        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call]
+        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call,unused-ignore]
 
         if deterministic:
             action = action_mean
@@ -164,7 +164,7 @@ class LSTMPPOAgent(nn.Module):
         ).clamp(min=0.01)
         # Guard against NaN from Tanh saturation
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
-        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call]
+        dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call,unused-ignore]
 
         log_probs = dist.log_prob(action_batch).sum(dim=-1)  # type: ignore[no-untyped-call]  # (batch,)
         values = self.critic(h).squeeze(-1)                   # (batch,)
