@@ -121,6 +121,14 @@ def build_kelly_table(pre_oot_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _kelly_fraction_for(ml_prob: float, kelly_table: pd.DataFrame) -> float:
+    """Map a single ml_prob to its bin's f_capped. Defensive floor for out-of-range."""
+    for _, row in kelly_table.iterrows():
+        if row["bin_low"] <= ml_prob < row["bin_high"]:
+            return float(row["f_capped"])
+    return KELLY_FRACTION_FLOOR
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 

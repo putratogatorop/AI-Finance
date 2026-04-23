@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from backtest_v2_resized import build_kelly_table  # noqa: E402
+from backtest_v2_resized import _kelly_fraction_for, build_kelly_table  # noqa: E402
 
 
 def _make_trades(rows):
@@ -93,3 +93,24 @@ def test_kelly_table_returns_all_bins():
     # 5 bins: [0.70,0.75) [0.75,0.80) [0.80,0.85) [0.85,0.90) [0.90,1.01)
     assert len(tbl) == 5
     assert list(tbl["bin_low"]) == [0.70, 0.75, 0.80, 0.85, 0.90]
+
+
+def test_kelly_fraction_for_maps_to_correct_bin():
+    tbl = pd.DataFrame([
+        {"bin_low": 0.70, "bin_high": 0.75, "f_capped": 0.03},
+        {"bin_low": 0.75, "bin_high": 0.80, "f_capped": 0.05},
+        {"bin_low": 0.80, "bin_high": 0.85, "f_capped": 0.10},
+        {"bin_low": 0.85, "bin_high": 0.90, "f_capped": 0.15},
+        {"bin_low": 0.90, "bin_high": 1.01, "f_capped": 0.15},
+    ])
+    assert _kelly_fraction_for(0.72, tbl) == 0.03
+    assert _kelly_fraction_for(0.80, tbl) == 0.10  # inclusive-left
+    assert _kelly_fraction_for(0.95, tbl) == 0.15
+
+
+def test_kelly_fraction_below_range_uses_floor():
+    """ml_prob below min bin (shouldn't happen given threshold, defensive)."""
+    tbl = pd.DataFrame([
+        {"bin_low": 0.70, "bin_high": 0.75, "f_capped": 0.03},
+    ])
+    assert _kelly_fraction_for(0.50, tbl) == 0.02  # KELLY_FRACTION_FLOOR
