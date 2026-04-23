@@ -1,0 +1,18 @@
+{
+  "BIG_MOVER_THRESHOLD": 0.1,
+  "FEE_RATE": 0.0006,
+  "HOLD_OUT_MONTHS": 3,
+  "LEVERAGE": 5,
+  "MAX_CONCURRENT_POSITIONS": 5,
+  "MAX_HOLD_BARS": 192,
+  "POSITION_PCT": 0.05,
+  "PRICE_MOVE_THRESH": 0.05,
+  "SL_PCT": 0.05,
+  "SNAPSHOT_DATE": "2026-04-24",
+  "TRAIL_ACTIVATION": 0.02,
+  "TRAIL_PCT": 0.03,
+  "VOL_SPIKE": 3.0,
+  "cooldown_bars": 96,
+  "oot_start_ts": 1769153400,
+  "variant": "vol_rank_pctl90"
+}

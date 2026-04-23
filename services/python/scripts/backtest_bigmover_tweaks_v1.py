@@ -41,7 +41,7 @@ _NON_PARAM_NAMES = frozenset({"UTC"})
 # ---------------------------------------------------------------------------
 # CONSTANTS
 # ---------------------------------------------------------------------------
-SNAPSHOT_DATE = "2026-04-23"
+SNAPSHOT_DATE = "2026-04-24"  # post-backfill: +32 pairs incl CHIP, HOLO, GUN
 RANDOM_SEED = 42
 
 # Universe

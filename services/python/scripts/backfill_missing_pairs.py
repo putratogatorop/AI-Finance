@@ -89,7 +89,6 @@ def main() -> None:
     print()
 
     now_ts = int(time.time())
-    start_ts = now_ts - BOOTSTRAP_DAYS * 86400
     total_rows = 0
     failed = []
 
