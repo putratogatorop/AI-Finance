@@ -44,10 +44,27 @@ THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60]
 # Strategy key for the existing v2 accounts (failed-bounce short scanner).
 V2_STRATEGY = "v2_failed_bounce"
 
-# Bigmover paper accounts (added 2026-04-23). 6 separate portfolios, one per
-# (signal_type, direction). Each reads from scanner_signals_bigmover. Threshold
-# is stored as sentinel 1.0 — bigmover has no ML gate.
+# Bigmover-specific sizing overrides (derived from 3y sizing-sweep backtest
+# commit 195388b9: 15%/5x/SL7% dominates 10%/5x/SL5% on PF / PF_p5 / Calmar).
+BIGMOVER_POSITION_PCT = 0.15
+BIGMOVER_LEVERAGE = 5
+BIGMOVER_SL_PCT = 0.07
+
+# Notional cap for bigmover compounding — prevents live equity from compounding
+# into astronomical notionals. Gate.io per-position liquidity for top-100 alts
+# tops out around $500k-$5M depending on tier; $100k is safe and realistic for
+# an initial deploy. Raise later if account grows and liquidity allows.
+BIGMOVER_NOTIONAL_CAP_USD = float(
+    os.environ.get("BIGMOVER_NOTIONAL_CAP_USD", "100000")
+)
+
+# Bigmover paper accounts (added 2026-04-23). 7 separate portfolios:
+#   6 single-direction (one per signal_type x direction)
+#   1 COMBINED (multi_bar_confirm long+short sharing a single 5-slot pool)
+# Each reads from scanner_signals_bigmover. Threshold is stored as sentinel 1.0
+# because bigmover has no ML gate.
 #   strategy_key matches scanner_signals_bigmover.signal_type + direction.
+#   direction=None on the combined account means "accept both sides".
 BIGMOVER_ACCOUNTS: list[dict] = [
     {"strategy": "bigmover_baseline_short",
      "signal_type": "baseline", "direction": "short"},
@@ -61,8 +78,16 @@ BIGMOVER_ACCOUNTS: list[dict] = [
      "signal_type": "multi_bar_confirm", "direction": "short"},
     {"strategy": "bigmover_multi_bar_confirm_long",
      "signal_type": "multi_bar_confirm", "direction": "long"},
+    # Combined long+short, shared 5-slot pool. Backtest winner by PF and DD
+    # (PF 3.15, DD -7.7%, +6,825% flat / $8.19M compounding@$100k cap over 3y).
+    {"strategy": "bigmover_multi_bar_confirm_combined",
+     "signal_type": "multi_bar_confirm", "direction": None},
 ]
 BIGMOVER_SENTINEL_THRESHOLD = 1.0  # no ML gate; distinguishes rows from v2 ones
+
+
+def _is_bigmover_strategy(strategy: str) -> bool:
+    return strategy.startswith("bigmover_")
 
 # Portfolio sim
 STARTING_EQUITY_USD = 100.0   # paper $100; adjust to match what you'd start live
@@ -394,14 +419,23 @@ def open_paper_trade(
         return
 
     equity = current_equity(engine, threshold, strategy)
-    position_usd = equity * POSITION_PCT * LEVERAGE
+
+    if _is_bigmover_strategy(strategy):
+        # Bigmover: use 15%/5x sizing (sweep winner), apply notional cap, use SL=7%.
+        desired_notional = equity * BIGMOVER_POSITION_PCT * BIGMOVER_LEVERAGE
+        position_usd = min(desired_notional, BIGMOVER_NOTIONAL_CAP_USD)
+        sl_pct_used = BIGMOVER_SL_PCT
+    else:
+        # Legacy v2 sizing.
+        position_usd = equity * POSITION_PCT * LEVERAGE
+        sl_pct_used = SL_PCT
 
     if sig.direction == "short":
         tp_price = 0
-        sl_price = sig.entry_price * (1 + SL_PCT)
+        sl_price = sig.entry_price * (1 + sl_pct_used)
     else:
         tp_price = 0
-        sl_price = sig.entry_price * (1 - SL_PCT)
+        sl_price = sig.entry_price * (1 - sl_pct_used)
 
     logger.info(
         f"[DRY-RUN {strategy}@{threshold}] {sig.direction.upper()} {sig.symbol} "
@@ -532,12 +566,13 @@ def main():
     ensure_paper_table(engine)
 
     logger.info("=" * 60)
-    logger.info("PAPER EXECUTOR (DRY-RUN) — v2 multi-threshold + 6 bigmover accounts")
-    logger.info(f"v2 thresholds:   {THRESHOLDS} (shorts only)")
+    logger.info("PAPER EXECUTOR (DRY-RUN) — v2 multi-threshold + 7 bigmover accounts")
+    logger.info(f"v2 thresholds:   {THRESHOLDS} (shorts only, sizing {POSITION_PCT*100:.0f}%/{LEVERAGE}x/SL{SL_PCT*100:.0f}%)")
     logger.info(f"Bigmover:        {len(BIGMOVER_ACCOUNTS)} accounts ({', '.join(a['strategy'] for a in BIGMOVER_ACCOUNTS)})")
+    logger.info(f"Bigmover sizing: {BIGMOVER_POSITION_PCT*100:.0f}%/{BIGMOVER_LEVERAGE}x/SL{BIGMOVER_SL_PCT*100:.0f}% (sweep winner)")
+    logger.info(f"Bigmover cap:    ${BIGMOVER_NOTIONAL_CAP_USD:,.0f} max notional/trade")
     logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per account")
-    logger.info(f"Position size:   {POSITION_PCT*100:.0f}% @ {LEVERAGE}x")
-    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | SL -{SL_PCT*100:.0f}% | timeout {MAX_BARS_HOLD} bars")
+    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | timeout {MAX_BARS_HOLD} bars")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
     logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per account")
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")
@@ -565,7 +600,7 @@ def main():
                         break
                     open_paper_trade(engine, sig, th, V2_STRATEGY)
 
-            # Bigmover accounts (6 separate portfolios, one per signal x direction)
+            # Bigmover accounts (7 portfolios: 6 single-direction + 1 combined)
             for acct in BIGMOVER_ACCOUNTS:
                 halted = today_pnl_pct(
                     engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
@@ -575,7 +610,9 @@ def main():
                 for sig in bm_sigs:
                     if sig.signal_type != acct["signal_type"]:
                         continue
-                    if sig.direction != acct["direction"]:
+                    # direction=None on an account means "accept both sides"
+                    # (used by bigmover_multi_bar_confirm_combined).
+                    if acct["direction"] is not None and sig.direction != acct["direction"]:
                         continue
                     if open_positions(
                         engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
