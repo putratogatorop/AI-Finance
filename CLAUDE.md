@@ -56,6 +56,21 @@ Canonical helpers (`load_snapshot`, `compute_metrics`, `write_results`) are copy
 
 Existing scripts in `services/python/learn/22042026/` are archival — treat their reported numbers as unreliable until re-run under this protocol. The permanent smoke test is `services/python/scripts/backtest_reference_sma.py`; if its output ever drifts from the committed canary in `results/`, the plumbing is broken and must be fixed before trusting any new result.
 
+### Tighter Backtest Standard (added after v2+ML PF 5.05 vs paper-trading gap, 2026-04-23)
+
+Reproducibility ≠ truth. A backtest can be perfectly reproducible AND perfectly misleading. To be deployment-grade, a backtest MUST also satisfy:
+
+1. **Hold-out test set never seen during training or threshold selection.** Pick the last 3 months of the snapshot as a strict hold-out. Train (and tune any threshold/hyperparameter) on the rest. Report ONE number per metric on the hold-out. Never sweep params on the hold-out.
+2. **Walk-forward folds reported INDIVIDUALLY** — show median + 5/95 percentile across folds, not aggregated-then-re-optimized.
+3. **Feature audit**: every feature used in ML or signal logic must have a docstring confirming it's computable at signal-time only with no future bars referenced. Suspicious names (`bounce_*`, `rejection_*`, `peak_*`) get explicit verification.
+4. **Fees + slippage modeled**: minimum `0.06% × 2` per trade for Gate.io futures + `WORST_FILL_BUFFER = 0.005` past SL.
+5. **Universe-time-corrected**: when backtesting period T, use only coins listed at time T. The snapshot's `universe.parquet` has `listed_since` for this purpose.
+6. **Same model in backtest as in production**: if you train final on all data, you can NOT quote OOS PF as "what live will do." Either deploy the walk-forward fold's model, OR retrain on hold-out-included data and re-evaluate via fresh hold-out, OR explicitly note the gap.
+7. **Monte Carlo robustness**: bootstrap trade order ≥ 1000 times, report PF 5th/50th/95th percentile. If the 5th percentile crosses 1.0, the strategy isn't robust.
+8. **Strict ship floor**: PF ≥ 1.30 on the OUT-OF-TIME hold-out (last 3 months, never trained on). Below that = research, not deploy.
+
+Any backtest that reports headline numbers (PF, WR, monthly return) without satisfying ALL EIGHT is a research artifact, NOT a deployment justification. Cite specific compliance in any deploy PR.
+
 ## Git Workflow
 
 Every change must be recorded in git — no ad-hoc edits on the VPS, no "quick fixes" outside version control.
