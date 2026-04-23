@@ -124,6 +124,7 @@ Following `backtest-protocol.md`, written to `results/<run_id>/` via `write_resu
 - `trades_A.csv`, `trades_B.csv`, `trades_C.csv` — per-scenario ledgers with derived columns `notional_usd, pnl_usd, equity_after`
 - `kelly_table.csv` — the 5-bin table with p, b, f_raw, f_half, f_capped (auditable)
 - `skipped_by_concurrency.csv` — signals dropped from A and C (B has same as A)
+- `threshold_kelly_crosscheck.csv` — threshold × scenario × PnL matrix. Rows: [0.70, 0.72, 0.75, 0.78, 0.80, 0.85, 0.88, 0.90]. Columns: `threshold, A_trades, A_ret_pct, B_ret_pct, C_ret_pct`. Answers "is 0.70 still best under Kelly + concurrency?" as a byproduct.
 - `params.json` — all constants for reproducibility
 
 ## Tighter Backtest Standard Compliance
