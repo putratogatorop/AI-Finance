@@ -40,7 +40,7 @@ REQUEST_SLEEP_SEC = 0.1         # be polite to API
 POLL_INTERVAL_SEC = 60 * 15     # run ingest every 15 min
 LIVE_BARS_PER_COIN = 4          # on each tick, fetch last 4 bars (handles missed cycles)
 
-BOOTSTRAP_PAIR_COUNT = int(os.environ.get("BOOTSTRAP_PAIR_COUNT", "200"))
+BOOTSTRAP_PAIR_COUNT = int(os.environ.get("BOOTSTRAP_PAIR_COUNT", "400"))  # was 200
 BOOTSTRAP_DAYS = int(os.environ.get("BOOTSTRAP_DAYS", "90"))
 
 Path("logs").mkdir(exist_ok=True)
@@ -213,30 +213,34 @@ def fetch_top_usdt_pairs(n: int) -> list[str]:
     return [t["currency_pair"] for t in usdt[:n] if t["currency_pair"] not in DELISTED]
 
 
-def bootstrap_if_empty(conn):
-    """Seed an empty (or near-empty) DB with BOOTSTRAP_DAYS of 15m candles for the
-    top BOOTSTRAP_PAIR_COUNT USDT pairs. Skips if we already have enough coverage.
+def discover_and_backfill(conn):
+    """Find currently-tradable USDT pairs NOT in our DB (or grossly under-filled)
+    and backfill their history.
 
-    Idempotent: uses upsert. Safe to re-run after a partial bootstrap.
+    Replaces the earlier `bootstrap_if_empty` which had an early-return guard
+    once asset_count >= BOOTSTRAP_PAIR_COUNT, permanently freezing the asset
+    roster. New Gate.io listings (CHIP, HOLO, NEIRO, etc.) became invisible.
+
+    Idempotent: skips pairs already filled (>= 80% of expected bars).
+    Safe to call repeatedly (on startup AND in the live loop).
     """
+    # NOTE: removed `if asset_count >= BOOTSTRAP_PAIR_COUNT: return` — that
+    # guard was the bug.
     with conn.cursor() as cur:
         cur.execute("SELECT count(DISTINCT asset) FROM asset_prices_15m")
         asset_count = cur.fetchone()[0]
 
-    # Resume bootstrap whenever coverage falls below target — lets us pick up
-    # after a crash without manual intervention.
-    if asset_count >= BOOTSTRAP_PAIR_COUNT:
-        return
-
     logger.info("=" * 60)
-    logger.info(f"BOOTSTRAP: DB has {asset_count}/{BOOTSTRAP_PAIR_COUNT} assets")
-    logger.info(f"Seeding top {BOOTSTRAP_PAIR_COUNT} USDT pairs with {BOOTSTRAP_DAYS}d of 15m bars")
+    logger.info(
+        f"DISCOVERY: DB has {asset_count} assets; checking top {BOOTSTRAP_PAIR_COUNT} pairs"
+    )
+    logger.info(f"Will backfill any new/unfilled pairs with {BOOTSTRAP_DAYS}d of 15m bars")
     logger.info("=" * 60)
 
     pairs = fetch_top_usdt_pairs(BOOTSTRAP_PAIR_COUNT)
     logger.info(f"Gate.io returned {len(pairs)} candidate pairs")
     if not pairs:
-        logger.error("Bootstrap aborted: tickers endpoint returned no pairs")
+        logger.warning("Discovery: tickers endpoint returned no pairs")
         return
 
     # Skip pairs that are already reasonably complete (> 80% of expected bars)
@@ -285,10 +289,10 @@ def bootstrap_if_empty(conn):
                 f"(total {total_rows}, {elapsed:.0f}s elapsed, ~{eta:.0f}s remaining)"
             )
 
-    logger.info(f"Bootstrap complete: {total_rows} bars across {len(pairs)} pairs "
+    logger.info(f"Discovery complete: {total_rows} bars across {len(pairs)} pairs "
                 f"in {time.time() - t_start:.0f}s; {len(failed)} failed")
     if failed:
-        logger.info(f"Failed pairs (will retry next bootstrap): {', '.join(failed[:20])}"
+        logger.info(f"Failed pairs (will retry next discovery): {', '.join(failed[:20])}"
                     + (" ..." if len(failed) > 20 else ""))
 
 
@@ -489,8 +493,8 @@ def main():
 
     conn = psycopg2.connect(**DB_CONN)
 
-    # Self-seed on fresh deploy — no-op if DB already has reasonable coverage
-    bootstrap_if_empty(conn)
+    # Discover new listings + seed on fresh deploy. Skips already-filled pairs.
+    discover_and_backfill(conn)
 
     # CDC gap scan: strict on first run of the day, lenient otherwise
     strict = should_run_strict()
@@ -506,10 +510,15 @@ def main():
 
     logger.info(f"Entering live loop — polling every {POLL_INTERVAL_SEC}s")
 
+    discovery_interval_cycles = 96  # 96 × 15min = 24h
+
     cycle = 0
     while True:
         try:
             cycle += 1
+            # Periodically re-discover new Gate.io listings.
+            if cycle % discovery_interval_cycles == 1:  # runs at cycle 1, then every 96
+                discover_and_backfill(conn)
             t0 = time.time()
             inserted = tick_ingest(conn)
             elapsed = time.time() - t0
