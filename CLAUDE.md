@@ -44,6 +44,18 @@ Two environments with strict separation of concerns:
 
 When writing code, always ask: "does this run on VPS or local?" VPS code must stay lean and stateless w.r.t. long history.
 
+## Backtesting
+
+Any new backtest MUST:
+- Start from `services/python/scripts/backtest_template.py` — do not write from scratch.
+- Follow `docs/backtest-protocol.md` — non-negotiable rules.
+- Declare `SNAPSHOT_DATE` at the top (matching a row in `data/snapshots/MANIFEST.md`) and use `load_snapshot()` — never query live postgres for canonical numbers.
+- Write results via `write_results()` to `results/<run_id>/`. Commit that folder.
+
+Canonical helpers (`load_snapshot`, `compute_metrics`, `write_results`) are copy-pasted (not imported) into each backtest to guarantee identical math across all runs. Do not edit them after copying.
+
+Existing scripts in `services/python/learn/22042026/` are archival — treat their reported numbers as unreliable until re-run under this protocol. The permanent smoke test is `services/python/scripts/backtest_reference_sma.py`; if its output ever drifts from the committed canary in `results/`, the plumbing is broken and must be fixed before trusting any new result.
+
 ## Git Workflow
 
 Every change must be recorded in git — no ad-hoc edits on the VPS, no "quick fixes" outside version control.

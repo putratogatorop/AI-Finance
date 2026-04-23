@@ -1,0 +1,8 @@
+{
+  "ASSET": "BTCUSDT",
+  "HOLD_BARS": 96,
+  "RANDOM_SEED": 42,
+  "SMA_FAST": 20,
+  "SMA_SLOW": 50,
+  "SNAPSHOT_DATE": "2026-04-23"
+}

@@ -53,3 +53,6 @@ services/nextjs/tsconfig.tsbuildinfo
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 .claude/settings.local.json
+
+# Backtest data snapshots (large Parquet files — see data/snapshots/MANIFEST.md)
+data/snapshots/*.parquet
