@@ -15,12 +15,10 @@ Run from services/python/:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
 import sys
-import time as _time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -316,8 +314,211 @@ def _split_oot(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pre, oot
 
 
+RESULTS_ROOT = Path(__file__).resolve().parents[1] / "results"
+
+
+def _git_sha_short() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            cwd=Path(__file__).resolve().parents[3],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return "nogit"
+
+
+def _run_id() -> str:
+    sha = _git_sha_short()
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"backtest_v2_resized_{sha}_{ts}"
+
+
+def _write_outputs(
+    run_dir: Path,
+    metrics_a: dict,
+    metrics_b: dict,
+    metrics_c: dict,
+    mc_a: tuple,
+    mc_b: tuple,
+    mc_c: tuple,
+    ledger_a: pd.DataFrame,
+    ledger_b: pd.DataFrame,
+    ledger_c: pd.DataFrame,
+    kelly_table: pd.DataFrame,
+    crosscheck: pd.DataFrame,
+) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # metrics.json
+    def _mc_to_dict(mc):
+        return {"pf_p5": mc[0], "pf_p50": mc[1], "pf_p95": mc[2]}
+
+    def _merge(metrics, mc):
+        out = dict(metrics)
+        out.update(_mc_to_dict(mc))
+        # json-serialize inf as null
+        for k, v in list(out.items()):
+            if isinstance(v, float) and (v == float("inf") or v != v):
+                out[k] = None
+        return out
+
+    lift_b_minus_a = metrics_b["total_return_pct"] - metrics_a["total_return_pct"]
+    lift_c_minus_b = metrics_c["total_return_pct"] - metrics_b["total_return_pct"]
+    lift_c_minus_a = metrics_c["total_return_pct"] - metrics_a["total_return_pct"]
+
+    metrics_out = {
+        "scenario_A": _merge(metrics_a, mc_a),
+        "scenario_B": _merge(metrics_b, mc_b),
+        "scenario_C": _merge(metrics_c, mc_c),
+        "attribution": {
+            "lever_1_lift_pct": lift_b_minus_a,
+            "lever_4_lift_pct": lift_c_minus_b,
+            "combined_lift_pct": lift_c_minus_a,
+        },
+    }
+    with open(run_dir / "metrics.json", "w") as f:
+        json.dump(metrics_out, f, indent=2)
+
+    # params.json
+    params = {
+        "SNAPSHOT_SOURCE": SOURCE_TABLE,
+        "ML_THRESHOLD": ML_THRESHOLD,
+        "START_EQUITY_USD": START_EQUITY_USD,
+        "LEVERAGE": LEVERAGE,
+        "BASELINE_EQUITY_FRACTION": BASELINE_EQUITY_FRACTION,
+        "KELLY_MULTIPLIER": KELLY_MULTIPLIER,
+        "KELLY_FRACTION_FLOOR": KELLY_FRACTION_FLOOR,
+        "KELLY_FRACTION_CAP": KELLY_FRACTION_CAP,
+        "KELLY_BIN_EDGES": KELLY_BIN_EDGES,
+        "ROUND_TRIP_FEE": ROUND_TRIP_FEE,
+        "HOLD_OUT_MONTHS": HOLD_OUT_MONTHS,
+        "MAX_CONCURRENT_A": MAX_CONCURRENT_A,
+        "MAX_CONCURRENT_B": MAX_CONCURRENT_B,
+        "MAX_CONCURRENT_C": MAX_CONCURRENT_C,
+        "MC_ITER": MC_ITER,
+        "MC_SEED": MC_SEED,
+        "BAR_MINUTES": BAR_MINUTES,
+    }
+    with open(run_dir / "params.json", "w") as f:
+        json.dump(params, f, indent=2)
+
+    # Ledgers
+    ledger_a.to_csv(run_dir / "trades_A.csv", index=False)
+    ledger_b.to_csv(run_dir / "trades_B.csv", index=False)
+    ledger_c.to_csv(run_dir / "trades_C.csv", index=False)
+
+    # Kelly table
+    kelly_table.to_csv(run_dir / "kelly_table.csv", index=False)
+
+    # Skipped by concurrency (A vs C; B same as A)
+    skipped_a = ledger_a[~ledger_a["taken"]].copy()
+    skipped_a["scenario"] = "A"
+    skipped_c = ledger_c[~ledger_c["taken"]].copy()
+    skipped_c["scenario"] = "C"
+    pd.concat([skipped_a, skipped_c], ignore_index=True).to_csv(
+        run_dir / "skipped_by_concurrency.csv", index=False
+    )
+
+    # Monthly comparison
+    def _monthly(ledger, col):
+        taken = ledger[ledger["taken"]].copy()
+        taken["month"] = taken["signal_time"].dt.to_period("M").astype(str)
+        return taken.groupby("month")["pnl_usd"].sum().rename(col)
+
+    monthly = pd.concat(
+        [
+            _monthly(ledger_a, "A_pnl_usd"),
+            _monthly(ledger_b, "B_pnl_usd"),
+            _monthly(ledger_c, "C_pnl_usd"),
+        ],
+        axis=1,
+    ).fillna(0.0).reset_index()
+    for sc in ["A", "B", "C"]:
+        monthly[f"{sc}_ret_pct"] = monthly[f"{sc}_pnl_usd"] / START_EQUITY_USD * 100.0
+    monthly.to_csv(run_dir / "monthly_comparison.csv", index=False)
+
+    # Crosscheck
+    crosscheck.to_csv(run_dir / "threshold_kelly_crosscheck.csv", index=False)
+
+
 def main():
-    raise NotImplementedError("Filled in by later tasks")
+    engine = create_engine(DB_URL)
+    print("Loading trades ...")
+    df = load_trades(engine)
+    date_min = df["signal_time"].min().date()
+    date_max = df["signal_time"].max().date()
+    print(f"  {len(df)} trades  {date_min} -> {date_max}")
+
+    pre_oot, oot = _split_oot(df)
+    print(f"  pre-OOT: {len(pre_oot)}  OOT: {len(oot)}")
+
+    # Apply threshold gate to OOT (pre-OOT uses same threshold for Kelly calibration)
+    pre_oot_th = pre_oot[pre_oot["ml_prob"] >= ML_THRESHOLD].reset_index(drop=True)
+    oot_th = oot[oot["ml_prob"] >= ML_THRESHOLD].reset_index(drop=True)
+    print(f"  pre-OOT (ml>={ML_THRESHOLD}): {len(pre_oot_th)}  OOT: {len(oot_th)}")
+
+    # --- Calibrate Kelly table on pre-OOT ONLY ---
+    print("\nCalibrating Kelly table on pre-OOT ...")
+    kelly_table = build_kelly_table(pre_oot_th)
+    print(kelly_table.to_string(index=False))
+
+    # --- Flat sizing table (baseline) ---
+    flat_tbl = pd.DataFrame([
+        {"bin_low": lo, "bin_high": hi, "f_capped": BASELINE_EQUITY_FRACTION,
+         "trades": 0, "p": 0.0, "b": 0.0, "f_raw": 0.0, "f_half": 0.0}
+        for lo, hi in zip(KELLY_BIN_EDGES[:-1], KELLY_BIN_EDGES[1:], strict=False)
+    ])
+
+    # --- Three scenarios on OOT ---
+    print("\nRunning scenario A (flat, conc=5) ...")
+    ledger_a, metrics_a = simulate(oot_th, flat_tbl, MAX_CONCURRENT_A, "A")
+    print(
+        f"  trades={metrics_a['trades']} ret={metrics_a['total_return_pct']:.1f}%"
+        f" pf={metrics_a['pf_net']:.2f}"
+    )
+
+    print("\nRunning scenario B (half-Kelly, conc=5) ...")
+    ledger_b, metrics_b = simulate(oot_th, kelly_table, MAX_CONCURRENT_B, "B")
+    print(
+        f"  trades={metrics_b['trades']} ret={metrics_b['total_return_pct']:.1f}%"
+        f" pf={metrics_b['pf_net']:.2f}"
+    )
+
+    print("\nRunning scenario C (half-Kelly, conc=10) ...")
+    ledger_c, metrics_c = simulate(oot_th, kelly_table, MAX_CONCURRENT_C, "C")
+    print(
+        f"  trades={metrics_c['trades']} ret={metrics_c['total_return_pct']:.1f}%"
+        f" pf={metrics_c['pf_net']:.2f}"
+    )
+
+    # --- Monte Carlo on each scenario's taken trades ---
+    print("\nMonte Carlo PF bootstrap ...")
+    mc_a = monte_carlo_pf(ledger_a[ledger_a["taken"]]["pnl_pct_net"].to_numpy())
+    mc_b = monte_carlo_pf(ledger_b[ledger_b["taken"]]["pnl_pct_net"].to_numpy())
+    mc_c = monte_carlo_pf(ledger_c[ledger_c["taken"]]["pnl_pct_net"].to_numpy())
+    print(f"  A PF: p5={mc_a[0]:.2f} p50={mc_a[1]:.2f} p95={mc_a[2]:.2f}")
+    print(f"  B PF: p5={mc_b[0]:.2f} p50={mc_b[1]:.2f} p95={mc_b[2]:.2f}")
+    print(f"  C PF: p5={mc_c[0]:.2f} p50={mc_c[1]:.2f} p95={mc_c[2]:.2f}")
+
+    # --- Threshold crosscheck ---
+    print("\nThreshold x Kelly crosscheck ...")
+    crosscheck = threshold_kelly_crosscheck(oot, kelly_table)
+    print(crosscheck.to_string(index=False))
+
+    # --- Write outputs ---
+    run_dir = RESULTS_ROOT / _run_id()
+    _write_outputs(run_dir, metrics_a, metrics_b, metrics_c, mc_a, mc_b, mc_c,
+                   ledger_a, ledger_b, ledger_c, kelly_table, crosscheck)
+    print(f"\nWrote results to: {run_dir}")
+
+    # --- Attribution summary ---
+    print("\n=== ATTRIBUTION ===")
+    print(f"A baseline return:     {metrics_a['total_return_pct']:>7.1f}%")
+    lift_b = metrics_b["total_return_pct"] - metrics_a["total_return_pct"]
+    lift_c = metrics_c["total_return_pct"] - metrics_a["total_return_pct"]
+    print(f"B (+Kelly) return:     {metrics_b['total_return_pct']:>7.1f}%  (lift: {lift_b:+.1f}%)")
+    print(f"C (+Kelly+conc) return: {metrics_c['total_return_pct']:>7.1f}%  (lift: {lift_c:+.1f}%)")
 
 
 if __name__ == "__main__":
