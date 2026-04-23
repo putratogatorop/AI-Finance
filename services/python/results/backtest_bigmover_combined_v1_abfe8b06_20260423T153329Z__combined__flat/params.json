@@ -1,0 +1,19 @@
+{
+  "directions": [
+    "long",
+    "short"
+  ],
+  "leverage": 5,
+  "max_concurrent_positions": 5,
+  "max_hold_bars": 192,
+  "mode": "flat",
+  "position_pct": 0.15,
+  "regime_gate": null,
+  "round_trip_fee": 0.0012,
+  "signal": "multi_bar_confirm",
+  "sl_pct": 0.07,
+  "snapshot_date": "2026-04-24",
+  "start_equity_usd": 100.0,
+  "trail_activation": 0.02,
+  "trail_pct": 0.03
+}

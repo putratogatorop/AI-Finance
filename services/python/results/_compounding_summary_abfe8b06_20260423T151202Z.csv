@@ -1,0 +1,3 @@
+account,direction,position_pct,leverage,sl_pct,trades,wr,pf,final_equity_usd,total_return_pct,max_drawdown_pct,avg_notional_usd,final_notional_usd,months,run_dir
+multi_bar_confirm_long_15_5_7,long,0.15,5,0.07,4816,0.6509551495016611,3.0898116362348027,2.8174993534267864e+20,2.8174993534267864e+20,-43.409747086150745,2.0079415448628244e+18,2.112957331229776e+20,37,backtest_bigmover_compounding_v1_abfe8b06_20260423T151201Z__multi_bar_confirm_long_15_5_7
+multi_bar_confirm_short_15_5_7,short,0.15,5,0.07,4006,0.6727408886669995,3.1438741419087957,2.109274790017052e+16,2.109274790017042e+16,-40.395534143426694,682163824581188.1,1.587518421859377e+16,37,backtest_bigmover_compounding_v1_abfe8b06_20260423T151201Z__multi_bar_confirm_short_15_5_7

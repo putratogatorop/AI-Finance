@@ -1,0 +1,3 @@
+scenario,trades,wr,pf,avg_pnl_pct,total_return_pct,max_drawdown_pct,final_equity_usd,long_trades,short_trades,avg_winner_pct,avg_loser_pct,run_dir,trades_capped,avg_notional_usd,final_notional_usd
+combined_flat_15_5_7,7141,0.6651729449656911,3.147364869306287,0.013943890145292926,6825.308964565258,-7.718148555337065,6925.308964565258,3960,3181,0.030724910407338043,-0.02503779962598214,backtest_bigmover_combined_v1_abfe8b06_20260423T153329Z__combined__flat,,,
+combined_compound_15_5_7_cap100k,7141,0.6651729449656911,3.147364869306287,,8186890.080493371,-31.157253839778388,8186990.080493372,3960,3181,,,backtest_bigmover_combined_v1_abfe8b06_20260423T153329Z__combined__cap100k,6361.0,90841.16145553334,100000.0

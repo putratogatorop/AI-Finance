@@ -1,0 +1,12 @@
+{
+  "compounding": true,
+  "direction": "short",
+  "label": "multi_bar_confirm_short_15_5_7",
+  "leverage": 5,
+  "notional_cap_usd": 1000000,
+  "position_pct": 0.15,
+  "round_trip_fee": 0.0012,
+  "sl_pct": 0.07,
+  "source_run": "backtest_bigmover_sizing_sweep_v1_abfe8b06_20260423T145954Z__multi_bar_confirm__short__15pct_05x_sl07",
+  "start_equity_usd": 100.0
+}
