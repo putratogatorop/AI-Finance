@@ -46,4 +46,4 @@ class RLConfig:
     LSTM_LOOKBACK: int = 10
 
     # Universe
-    INDICATOR_ASSETS: tuple = ("BTC", "ETH")
+    INDICATOR_ASSETS: tuple[str, ...] = ("BTC", "ETH")

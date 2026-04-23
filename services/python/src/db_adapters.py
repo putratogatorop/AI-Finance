@@ -10,15 +10,17 @@ Importing this module has the side effect of registering the adapters process-wi
 Do it once, as early as possible in any script that writes numpy values to postgres.
 """
 
+from typing import Any
+
 import numpy as np
 from psycopg2.extensions import AsIs, Float, register_adapter
 
 
-def _adapt_numpy_float(value):
+def _adapt_numpy_float(value: np.floating[Any]) -> Float:
     return Float(float(value))
 
 
-def _adapt_numpy_int(value):
+def _adapt_numpy_int(value: np.integer[Any]) -> AsIs:
     return AsIs(int(value))
 
 

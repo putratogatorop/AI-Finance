@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import Any
 
 from src.ml.ensemble import EnsembleResult
 
@@ -25,7 +26,7 @@ class TradeSignal:
     model_agreement: str
     timestamp: datetime
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         d = asdict(self)
         d["timestamp"] = self.timestamp.isoformat()

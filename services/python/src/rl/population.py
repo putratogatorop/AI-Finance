@@ -6,6 +6,7 @@ import copy
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -24,7 +25,7 @@ class PopulationTrainer:
 
     def __init__(
         self,
-        dataset: dict,
+        dataset: dict[str, Any],
         population_size: int = 10,
         episodes_per_agent: int = 10,
         mutation_noise: float = 0.05,
@@ -150,7 +151,7 @@ class PopulationTrainer:
 
             self.scores[dead_idx] = 0.0
 
-    def run_generation(self) -> dict:
+    def run_generation(self) -> dict[str, Any]:
         """Run one generation: evaluate, evolve, checkpoint.
 
         Returns stats dict with generation, best/mean/worst reward, elapsed_s.
@@ -187,9 +188,9 @@ class PopulationTrainer:
             "elapsed_s": elapsed,
         }
 
-    def train(self, n_generations: int) -> list[dict]:
+    def train(self, n_generations: int) -> list[dict[str, Any]]:
         """Run multiple generations and return stats list."""
-        stats_list: list[dict] = []
+        stats_list: list[dict[str, Any]] = []
         gen_times: list[float] = []
         for i in range(n_generations):
             stats = self.run_generation()

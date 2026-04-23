@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 
 from src.rl.config import RLConfig
@@ -13,7 +15,7 @@ class CryptoTradingEnv:
 
     def __init__(
         self,
-        dataset: dict,
+        dataset: dict[str, Any],
         config: RLConfig | None = None,
         top_n: int | None = None,
     ) -> None:
@@ -35,7 +37,8 @@ class CryptoTradingEnv:
 
         # Unpack (filtered) dataset
         self.alt_features = alt_features
-        self.ind_features: np.ndarray = dataset["indicator_features"]  # (T, n_ind_feat)
+        # (T, n_ind_feat)
+        self.ind_features: np.ndarray[Any, np.dtype[Any]] = dataset["indicator_features"]
         self.prices = prices
         self.alt_names = alt_names
         self.timestamps = dataset["timestamps"]
@@ -61,7 +64,7 @@ class CryptoTradingEnv:
     # ------------------------------------------------------------------
     # Gym interface
     # ------------------------------------------------------------------
-    def reset(self, start_idx: int | None = None) -> np.ndarray:
+    def reset(self, start_idx: int | None = None) -> np.ndarray[Any, np.dtype[Any]]:
         """Reset env and return initial observation."""
         self.portfolio = Portfolio(self.cfg)
         self.step_idx = 0
@@ -81,8 +84,8 @@ class CryptoTradingEnv:
         return self._get_observation()
 
     def step(
-        self, action: np.ndarray
-    ) -> tuple[np.ndarray, float, bool, dict]:
+        self, action: np.ndarray[Any, np.dtype[Any]]
+    ) -> tuple[np.ndarray[Any, np.dtype[Any]], float, bool, dict[str, Any]]:
         """Execute one 12-hour window. Returns (obs, reward, done, info)."""
         assert self.portfolio is not None, "Call reset() before step()."
 
@@ -237,7 +240,7 @@ class CryptoTradingEnv:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
-    def _get_observation(self) -> np.ndarray:
+    def _get_observation(self) -> np.ndarray[Any, np.dtype[Any]]:
         """Build flat observation vector."""
         candle_idx = self.start_idx + self.step_idx * self.cfg.CANDLES_PER_WINDOW
         candle_idx = min(candle_idx, self.n_times - 1)
@@ -250,13 +253,14 @@ class CryptoTradingEnv:
             self.alt_names[i]: float(close_prices[i])
             for i in range(self.n_alts)
         }
+        assert self.portfolio is not None, "Call reset() before _get_observation()."
         port_vec = np.array(
             self.portfolio.get_state_vector(current_prices), dtype=np.float64
         )
 
         obs = np.concatenate([alt_flat, ind_flat, port_vec])
         obs = np.nan_to_num(obs, nan=0.0)
-        return obs
+        return cast(np.ndarray[Any, np.dtype[Any]], obs)
 
     def _episode_reward(self) -> float:
         """Compute shaped episode reward from returns history."""

@@ -10,12 +10,18 @@ Simulates trading LightGBM OOS predictions with realistic costs:
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
 
-def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                  period: int = 56) -> np.ndarray:
+def _compute_atr(
+    high: np.ndarray[Any, np.dtype[Any]],
+    low: np.ndarray[Any, np.dtype[Any]],
+    close: np.ndarray[Any, np.dtype[Any]],
+    period: int = 56,
+) -> np.ndarray[Any, np.dtype[Any]]:
     """Compute ATR over `period` bars. ATR(56) on 15min = ~14h of volatility."""
     n = len(close)
     tr = np.empty(n)
@@ -45,7 +51,7 @@ def backtest_coin(
     atr_tp_mult: float = 5.0,          # TP = entry +/- atr_tp_mult * ATR
     max_hold_bars: int = 192,           # 48h at 15min
     risk_per_trade: float = 0.01,       # 1% of equity per trade
-) -> dict:
+) -> dict[str, Any]:
     """Run backtest on a single coin's OOS predictions.
 
     Changes from v1:
@@ -199,7 +205,7 @@ def backtest_coin(
     return {"trades": trades, "equity_curve": eq_series, "metrics": metrics}
 
 
-def compute_metrics(trades: list[dict], equity_curve: pd.Series) -> dict:
+def compute_metrics(trades: list[dict[str, Any]], equity_curve: pd.Series) -> dict[str, Any]:
     n_trades = len(trades)
     if n_trades == 0:
         return _empty_metrics()
@@ -250,7 +256,7 @@ def compute_metrics(trades: list[dict], equity_curve: pd.Series) -> dict:
     }
 
 
-def _empty_metrics() -> dict:
+def _empty_metrics() -> dict[str, Any]:
     return {
         "total_trades": 0, "total_return_pct": 0.0, "win_rate": 0.0,
         "avg_win_pct": 0.0, "avg_loss_pct": 0.0, "profit_factor": 0.0,

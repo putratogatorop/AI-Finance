@@ -1,6 +1,7 @@
 import logging
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from src.data.binance_client import BinanceClient
 from src.data.csv_storage import CsvStorage
@@ -31,7 +32,7 @@ class Backfiller:
                 dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
                 rows = self.binance.fetch_historical_hourly(asset, since=dt, limit=24)
                 if rows:
-                    date_rows: dict[str, list[dict]] = {}
+                    date_rows: dict[str, list[dict[str, Any]]] = {}
                     for row in rows:
                         row_date = row["timestamp"][:10]
                         date_rows.setdefault(row_date, []).append(row)

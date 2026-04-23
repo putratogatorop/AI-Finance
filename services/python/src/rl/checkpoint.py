@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -14,7 +15,7 @@ def save_checkpoint(
     checkpoint_dir: Path,
     agents: list[LSTMPPOAgent],
     scores: list[float],
-    metadata: dict,
+    metadata: dict[str, Any],
 ) -> None:
     """Save population checkpoint to disk.
 
@@ -40,7 +41,7 @@ def load_checkpoint(
     n_alts: int,
     hidden_size: int = 128,
     num_layers: int = 2,
-) -> tuple[list[LSTMPPOAgent], list[float], dict] | None:
+) -> tuple[list[LSTMPPOAgent], list[float], dict[str, Any]] | None:
     """Load population checkpoint from disk.
 
     Returns None if metadata.json doesn't exist (no checkpoint found).
