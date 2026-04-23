@@ -122,12 +122,23 @@
       "Bash(taskkill //PID 30780 //F)",
       "Bash(npm run:*)",
       "Bash(taskkill //IM python.exe //F)",
-      "Bash(grep -E \"\\\\.pub$|^total\")",
-      "Bash(mkdir -p ~/.ssh)",
-      "Bash(chmod 700 ~/.ssh)",
-      "Bash(ssh-keygen -t ed25519 -C \"togatorop.putra@gmail.com\" -f ~/.ssh/id_ed25519 -N \"\")",
-      "Bash(ssh *)",
-      "Bash(wait *)"
+      "Bash(ps -W)",
+      "Bash(git remote:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(bash:*)",
+      "Bash(PGPASSWORD='MySQL100%' psql -U postgres -d market -c \"SELECT 'long' as dir, COUNT\\(*\\) as total, MAX\\(signal_time\\) as latest FROM scanner_signals_long_v2 UNION ALL SELECT 'short', COUNT\\(*\\), MAX\\(signal_time\\) FROM scanner_signals_v2;\")",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(wmic process *)",
+      "Bash(grep -r \"SCANNER\\\\|scanner\\\\|ML_THRESHOLD\\\\|VOL_SPIKE\\\\|PRICE_DROP\\\\|PULLBACK\" /c/Users/togat/Desktop/AI-Finance/services/python/scripts/live_scanner*.py)",
+      "Bash(grep -E \"PRICE_RISE_THRESH|RECLAIM_PCT|BOUNCE_MIN_PCT|REJECTION_PCT|COOLDOWN|STOP_LOSS|TAKE_PROFIT|MAX_BARS\" /c/Users/togat/Desktop/AI-Finance/services/python/scripts/live_scanner*.py)",
+      "Bash(grep -E \"CREATE TABLE.*scanner\" /c/Users/togat/Desktop/AI-Finance/services/python/scripts/live_scanner*.py -A 20)",
+      "Bash(grep -n \"move_pct\" services/python/scripts/create_big_movers*.py services/python/scripts/tag_big_movers.py)",
+      "Bash(PGPASSWORD='MySQL100%' psql -h localhost -U postgres -d market -c \"\\\\d volume_breakouts\")",
+      "Bash(head -2 \"C:/Users/togat/Desktop/AI-Finance/data/raw/15m/BTCUSDT/\"*.csv)",
+      "Bash(PGPASSWORD='MySQL100%' psql -h localhost -U postgres -d market -c \"\\\\d big_movers\")",
+      "Bash(PGPASSWORD='MySQL100%' psql *)",
+      "Bash(tee /tmp/agent_f_out.log)",
+      "Bash(git ls-remote *)"
     ]
   }
 }

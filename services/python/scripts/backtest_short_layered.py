@@ -23,6 +23,9 @@ DATA_DIR = "../../data/raw/15m"
 THRESHOLD = 0.90
 BARS_24H = 96  # 24h of 15m candles
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 
 # ---------------------------------------------------------------------------
 # Task 1 — CSV Loader
@@ -158,6 +161,8 @@ def sim_trade(
 
     # Aggregate
     total_pnl = sum(layers[i].weight * layer_pnl[i] for i in range(n_layers))
+    # Round-trip friction (entry + exit): fees + spread/slippage on altcoins
+    total_pnl -= FRICTION_PCT
 
     # Dominant exit reason by weight
     reason_weights: dict[str, float] = {}

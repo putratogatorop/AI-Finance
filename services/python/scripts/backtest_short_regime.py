@@ -41,6 +41,9 @@ VARIANTS = {
     "v2_regime_5_5":  {"stop_pct": 0.05, "tp_pct": 0.05, "timeout": 192},
 }
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 # ── ML Feature columns ──────────────────────────────────────────────
 FEATURE_COLS = [
     "vol_ratio", "price_move", "price_change_1bar", "price_change_4bar",
@@ -127,7 +130,7 @@ def simulate_trade(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
     for bar in range(entry_bar + 1, last_bar):
         if high[bar] >= sl_price:
             return {
-                "pnl_pct": -stop_pct,
+                "pnl_pct": -stop_pct - FRICTION_PCT,
                 "exit_reason": "stop_loss",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -135,7 +138,7 @@ def simulate_trade(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
             }
         if low[bar] <= tp_price:
             return {
-                "pnl_pct": tp_pct,
+                "pnl_pct": tp_pct - FRICTION_PCT,
                 "exit_reason": "take_profit",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -144,7 +147,7 @@ def simulate_trade(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
 
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (entry_price - exit_price) / entry_price
+    pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": pnl_pct,
         "exit_reason": "timeout",

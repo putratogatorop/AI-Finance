@@ -42,6 +42,9 @@ RR_COMBOS = [
 
 TIMEOUTS = [96, 192, 384, 672]  # 24h, 48h, 96h, 1 week
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 
 def load_btc():
     """Load BTC 15m data and compute 30-bar EMA."""
@@ -116,14 +119,14 @@ def simulate_short(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
 
     for bar in range(entry_bar + 1, last_bar):
         if high[bar] >= sl_price:
-            return -stop_pct, "stop_loss"
+            return -stop_pct - FRICTION_PCT, "stop_loss"
         if low[bar] <= tp_price:
-            return tp_pct, "take_profit"
+            return tp_pct - FRICTION_PCT, "take_profit"
 
     # Timeout
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (entry_price - exit_price) / entry_price
+    pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return pnl_pct, "timeout"
 
 

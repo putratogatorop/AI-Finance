@@ -51,6 +51,9 @@ TAKE_PROFIT_PCT = 0.15
 TIMEOUT_BARS = 672
 COOLDOWN_BARS = 96
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 engine = create_engine(DB_URL)
 
 
@@ -94,7 +97,7 @@ def simulate_trade(
     for bar in range(entry_bar + 1, last_bar):
         # Check stop loss first (conservative)
         if low[bar] <= sl_price:
-            pnl_pct = (sl_price - entry_price) / entry_price
+            pnl_pct = (sl_price - entry_price) / entry_price - FRICTION_PCT
             return {
                 "pnl_pct": pnl_pct,
                 "exit_reason": "stop_loss",
@@ -105,7 +108,7 @@ def simulate_trade(
 
         # Check take profit
         if high[bar] >= tp_price:
-            pnl_pct = (tp_price - entry_price) / entry_price
+            pnl_pct = (tp_price - entry_price) / entry_price - FRICTION_PCT
             return {
                 "pnl_pct": pnl_pct,
                 "exit_reason": "take_profit",
@@ -117,7 +120,7 @@ def simulate_trade(
     # Timeout — exit at close of last bar
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (exit_price - entry_price) / entry_price
+    pnl_pct = (exit_price - entry_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": pnl_pct,
         "exit_reason": "timeout",

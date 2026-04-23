@@ -46,6 +46,11 @@ REJECTION_PCT = 0.03        # price gives back 3% from bounce high
 VARIANT_A = {"stop_pct": 0.05, "tp_pct": 0.05, "max_bars": 192, "label": "A (5%/5% 48h)"}
 VARIANT_B = {"stop_pct": 0.05, "tp_pct": 0.10, "max_bars": 384, "label": "B (5%/10% 96h)"}
 
+# Round-trip friction per trade: ~0.10% fees (Gate.io spot 0.1% maker/taker round-trip)
+# + 0.05% spread/slippage on altcoins = 0.15% total. Subtracted from pnl on every trade,
+# winners and losers alike.
+FRICTION_PCT = 0.0015
+
 # ── ML Feature columns ──────────────────────────────────────────────
 FEATURE_COLS = [
     "vol_ratio", "price_move", "price_change_1bar", "price_change_4bar",
@@ -144,7 +149,7 @@ def simulate_short(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
     for bar in range(entry_bar + 1, last_bar):
         if high[bar] >= sl_price:
             return {
-                "pnl_pct": -stop_pct,
+                "pnl_pct": -stop_pct - FRICTION_PCT,
                 "exit_reason": "stop_loss",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -152,7 +157,7 @@ def simulate_short(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
             }
         if low[bar] <= tp_price:
             return {
-                "pnl_pct": tp_pct,
+                "pnl_pct": tp_pct - FRICTION_PCT,
                 "exit_reason": "take_profit",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -162,7 +167,7 @@ def simulate_short(close, high, low, entry_bar, stop_pct, tp_pct, max_bars):
     # Timeout
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (entry_price - exit_price) / entry_price
+    pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": pnl_pct,
         "exit_reason": "timeout",

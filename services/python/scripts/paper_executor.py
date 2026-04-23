@@ -2,8 +2,8 @@
 
 Simulates placing orders on Gate.io WITHOUT sending real requests.
 - Polls scanner_signals_v2 (short) and scanner_signals_long_v2 (long) for new signals.
-- For each new signal, logs the order it WOULD place (entry, size, TP, SL).
-- Tracks each paper trade against live Gate.io prices; marks TP/SL/timeout exits.
+- For each new signal, logs the order it WOULD place (entry, size, SL).
+- Tracks each paper trade against live Gate.io prices; marks trailing stop/SL/timeout exits.
 - Records everything to `paper_trades` table for comparison vs backtest.
 
 Safety:
@@ -47,10 +47,11 @@ POSITION_PCT = 0.10           # 10% of equity per trade (matches backtest)
 LEVERAGE = 1                  # no leverage initially
 FEE_RATE = 0.0006             # 0.06% taker fee per side (Gate.io futures)
 
-# Exit params (match backtest Variant A — TP 5% / SL 5% / 192 bars = 48h)
-TP_PCT = 0.05
-SL_PCT = 0.05
-MAX_BARS_HOLD = 192           # 48h at 15min — hard timeout
+# Exit params — trailing stop (backed by learn/22042026 analysis)
+SL_PCT = 0.05                 # hard stop-loss at -5%
+TRAIL_ACTIVATION = 0.02       # start trailing after +2% unrealized
+TRAIL_PCT = 0.03              # exit when price gives back 3% from peak
+MAX_BARS_HOLD = 192           # 48h timeout unchanged
 
 # Poll / daemon
 POLL_INTERVAL_SEC = 60
@@ -142,6 +143,23 @@ def ensure_signal_tables(engine):
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scanner_signals_surge_v1 (
+                id SERIAL PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL DEFAULT 'short',
+                vol_ratio FLOAT,
+                price_move FLOAT,
+                signal_time TIMESTAMPTZ NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                entry_price FLOAT,
+                pnl_pct FLOAT,
+                exit_reason TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                regime_allowed BOOLEAN DEFAULT TRUE,
+                UNIQUE(symbol, signal_time)
+            )
+        """))
 
 
 def ensure_paper_table(engine):
@@ -183,6 +201,9 @@ def ensure_paper_table(engine):
         conn.execute(text(
             "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS venue VARCHAR(10)"
         ))
+        conn.execute(text("""
+            ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS peak_pnl_pct FLOAT DEFAULT 0.0
+        """))
         conn.execute(text(
             "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
         ))
@@ -228,6 +249,25 @@ def fetch_recent_signals(engine) -> list[Signal]:
                     entry_price=float(r[3]), signal_time=r[4],
                     regime_allowed=r[5],
                 ))
+        # Volume-surge signals (no ML model — use vol_ratio/10 as proxy)
+        surge_rows = conn.execute(text("""
+            SELECT id, symbol, direction, COALESCE(vol_ratio, 0) as ml_prob,
+                   signal_time, entry_price, COALESCE(regime_allowed, true)
+            FROM scanner_signals_surge_v1
+            WHERE signal_time > NOW() - INTERVAL '48 hours'
+              AND status = 'active'
+            ORDER BY signal_time DESC
+        """)).fetchall()
+
+        for r in surge_rows:
+            signals.append(Signal(
+                source_table="scanner_signals_surge_v1",
+                source_id=r[0], symbol=r[1], direction=r[2],
+                ml_prob=min(r[3] / 10, 1.0),
+                signal_time=r[4], entry_price=float(r[5]),
+                regime_allowed=r[6],
+            ))
+
     return signals
 
 
@@ -259,15 +299,19 @@ def today_pnl_pct(engine, threshold: float) -> float:
 
 
 def open_paper_trade(engine, sig: Signal, threshold: float):
+    # Short-only mode — skip longs until long-side edge is proven
+    if sig.direction == "long":
+        return
+
     equity = current_equity(engine, threshold)
     position_usd = equity * POSITION_PCT * LEVERAGE
 
-    if sig.direction == "long":
-        tp_price = sig.entry_price * (1 + TP_PCT)
-        sl_price = sig.entry_price * (1 - SL_PCT)
-    else:
-        tp_price = sig.entry_price * (1 - TP_PCT)
+    if sig.direction == "short":
+        tp_price = 0  # not used — trailing stop instead
         sl_price = sig.entry_price * (1 + SL_PCT)
+    else:
+        tp_price = 0
+        sl_price = sig.entry_price * (1 - SL_PCT)
 
     logger.info(
         f"[DRY-RUN @{threshold}] {sig.direction.upper()} {sig.symbol} "
@@ -294,19 +338,36 @@ def open_paper_trade(engine, sig: Signal, threshold: float):
 
 
 def check_and_close_trades(engine):
-    """For each open trade across all thresholds, check TP/SL/timeout."""
+    """For each open trade across all thresholds, check trailing stop / SL / timeout."""
     with engine.begin() as conn:
         trades = conn.execute(text("""
             SELECT id, symbol, direction, entry_price, entry_time,
-                   position_usd, tp_price, sl_price, threshold
+                   position_usd, tp_price, sl_price, threshold, peak_pnl_pct
             FROM paper_trades WHERE status = 'open'
         """)).fetchall()
 
     for t in trades:
-        trade_id, symbol, direction, entry, entry_time, pos_usd, tp, sl, threshold = t
+        (trade_id, symbol, direction, entry, entry_time,
+         pos_usd, tp, sl, threshold, peak_pnl) = t
+        peak_pnl = float(peak_pnl or 0.0)
+
         price = fetch_last_price(symbol, venue=venue_for_direction(direction))
         if price is None:
             continue
+
+        # Current unrealized PnL
+        if direction == "long":
+            cur_pnl = (price - entry) / entry
+        else:
+            cur_pnl = (entry - price) / entry
+
+        # Update peak PnL if new high
+        if cur_pnl > peak_pnl:
+            peak_pnl = cur_pnl
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "UPDATE paper_trades SET peak_pnl_pct = :peak WHERE id = :id"
+                ), {"peak": peak_pnl, "id": trade_id})
 
         # Timeout check — 192 bars * 15 min = 48h
         age_sec = (datetime.now(timezone.utc) - entry_time).total_seconds()
@@ -315,17 +376,21 @@ def check_and_close_trades(engine):
         exit_price = None
         exit_reason = None
 
+        # 1. Hard stop-loss
         if direction == "long":
-            if price >= tp:
-                exit_price, exit_reason = tp, "take_profit"
-            elif price <= sl:
+            if price <= sl:
                 exit_price, exit_reason = sl, "stop_loss"
         else:  # short
-            if price <= tp:
-                exit_price, exit_reason = tp, "take_profit"
-            elif price >= sl:
+            if price >= sl:
                 exit_price, exit_reason = sl, "stop_loss"
 
+        # 2. Trailing stop: activate after +TRAIL_ACTIVATION%, exit on TRAIL_PCT% drawdown
+        if exit_reason is None and peak_pnl >= TRAIL_ACTIVATION:
+            drawdown_from_peak = peak_pnl - cur_pnl
+            if drawdown_from_peak >= TRAIL_PCT:
+                exit_price, exit_reason = price, "trail_stop"
+
+        # 3. Timeout
         if exit_reason is None and age_bars >= MAX_BARS_HOLD:
             exit_price, exit_reason = price, "timeout"
 
@@ -362,7 +427,8 @@ def check_and_close_trades(engine):
         logger.info(
             f"[DRY-RUN EXIT {emoji}] {direction.upper()} {symbol} "
             f"{exit_reason} | entry=${entry:.6f} exit=${exit_price:.6f} "
-            f"pnl={pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | equity=${equity_after:.2f}"
+            f"pnl={pnl_pct*100:+.2f}% peak={peak_pnl*100:+.2f}% "
+            f"(${pnl_usd:+.2f}) | equity=${equity_after:.2f}"
         )
 
 
@@ -378,7 +444,8 @@ def main():
     logger.info(f"Thresholds:      {THRESHOLDS}")
     logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per threshold")
     logger.info(f"Position size:   {POSITION_PCT*100:.0f}% @ {LEVERAGE}x")
-    logger.info(f"TP/SL:           +{TP_PCT*100:.0f}% / -{SL_PCT*100:.0f}% (max {MAX_BARS_HOLD} bars = 48h)")
+    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | SL -{SL_PCT*100:.0f}% | timeout {MAX_BARS_HOLD} bars")
+    logger.info(f"Mode:            SHORT-ONLY (long disabled — PF < 1.0 across all exits)")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
     logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per threshold")
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")

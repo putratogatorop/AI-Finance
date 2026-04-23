@@ -48,6 +48,9 @@ REJECTION_PCT = 0.03
 # trailing_after = activate trail after X% profit, trailing_pct = trail distance
 # For "LAYERED" strategies: 50% exits at tp_pct, 50% uses trailing
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 EXIT_STRATEGIES = [
     # Fixed exits
     ("5%/5% 48h (current)", 0.05, 0.05, 192, None, None),
@@ -129,7 +132,7 @@ def simulate_short_fixed(close, high, low, entry_bar, stop_pct, tp_pct, max_bars
     for bar in range(entry_bar + 1, last_bar):
         if high[bar] >= sl_price:
             return {
-                "pnl_pct": -stop_pct,
+                "pnl_pct": -stop_pct - FRICTION_PCT,
                 "exit_reason": "stop_loss",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -137,7 +140,7 @@ def simulate_short_fixed(close, high, low, entry_bar, stop_pct, tp_pct, max_bars
             }
         if low[bar] <= tp_price:
             return {
-                "pnl_pct": tp_pct,
+                "pnl_pct": tp_pct - FRICTION_PCT,
                 "exit_reason": "take_profit",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -146,7 +149,7 @@ def simulate_short_fixed(close, high, low, entry_bar, stop_pct, tp_pct, max_bars
 
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (entry_price - exit_price) / entry_price
+    pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": pnl_pct,
         "exit_reason": "timeout",
@@ -182,7 +185,7 @@ def simulate_short_trailing(
         # Check fixed SL first
         if high[bar] >= sl_price:
             return {
-                "pnl_pct": -stop_pct,
+                "pnl_pct": -stop_pct - FRICTION_PCT,
                 "exit_reason": "stop_loss",
                 "bars_held": bar - entry_bar,
                 "entry_price": entry_price,
@@ -205,7 +208,7 @@ def simulate_short_trailing(
 
             # Check trail stop hit
             if high[bar] >= trail_stop:
-                pnl = (entry_price - trail_stop) / entry_price
+                pnl = (entry_price - trail_stop) / entry_price - FRICTION_PCT
                 return {
                     "pnl_pct": pnl,
                     "exit_reason": "trail_stop",
@@ -217,7 +220,7 @@ def simulate_short_trailing(
     # Timeout
     exit_bar = last_bar - 1
     exit_price = close[exit_bar]
-    pnl_pct = (entry_price - exit_price) / entry_price
+    pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": pnl_pct,
         "exit_reason": "timeout",
@@ -261,7 +264,7 @@ def simulate_short_layered(
                 )
                 # sl_price may have moved to breakeven
                 lot2_pnl = (entry_price - sl_price) / entry_price
-                combined = (lot1_pnl + lot2_pnl) / 2
+                combined = (lot1_pnl + lot2_pnl) / 2 - FRICTION_PCT
                 reason = "partial_then_sl" if lot2_pnl < 0 else "partial_then_be"
                 return {
                     "pnl_pct": combined,
@@ -272,7 +275,7 @@ def simulate_short_layered(
                 }
             else:
                 return {
-                    "pnl_pct": -stop_pct,
+                    "pnl_pct": -stop_pct - FRICTION_PCT,
                     "exit_reason": "stop_loss",
                     "bars_held": bar - entry_bar,
                     "entry_price": entry_price,
@@ -301,7 +304,7 @@ def simulate_short_layered(
                 trail_stop = new_trail
             if high[bar] >= trail_stop:
                 lot2_pnl = (entry_price - trail_stop) / entry_price
-                combined = (lot1_pnl + lot2_pnl) / 2
+                combined = (lot1_pnl + lot2_pnl) / 2 - FRICTION_PCT
                 return {
                     "pnl_pct": combined,
                     "exit_reason": "layered_complete",
@@ -315,9 +318,9 @@ def simulate_short_layered(
     exit_price = close[exit_bar]
     if lot1_closed:
         lot2_pnl = (entry_price - exit_price) / entry_price
-        combined = (lot1_pnl + lot2_pnl) / 2
+        combined = (lot1_pnl + lot2_pnl) / 2 - FRICTION_PCT
     else:
-        combined = (entry_price - exit_price) / entry_price
+        combined = (entry_price - exit_price) / entry_price - FRICTION_PCT
     return {
         "pnl_pct": combined,
         "exit_reason": "timeout",

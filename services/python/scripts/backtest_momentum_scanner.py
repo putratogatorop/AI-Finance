@@ -44,6 +44,9 @@ MAX_DAILY_MOVE = 0.30   # Skip if already up >30% (give room for big moves)
 # Regime filter
 BTC_TREND_PERIOD = 30   # 30 bars = 5 days on 4h for trend filter
 
+# Round-trip friction per trade (Gate.io fees + spread/slippage on altcoins)
+FRICTION_PCT = 0.0015
+
 
 def load_coin(symbol_dir: Path) -> pd.DataFrame | None:
     """Load all 4h CSVs for one coin, return DataFrame or None."""
@@ -260,11 +263,11 @@ def simulate_pullback_trade(
         exit_price = close[exit_bar]
         exit_reason = "time_exit"
 
-    # Calculate PnL
+    # Calculate PnL (net of round-trip friction: fees + spread/slippage)
     if direction == 1:
-        pnl_pct = (exit_price - entry_price) / entry_price
+        pnl_pct = (exit_price - entry_price) / entry_price - FRICTION_PCT
     else:
-        pnl_pct = (entry_price - exit_price) / entry_price
+        pnl_pct = (entry_price - exit_price) / entry_price - FRICTION_PCT
 
     return {
         "entry_bar": entry_bar,
