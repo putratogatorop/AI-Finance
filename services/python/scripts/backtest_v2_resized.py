@@ -129,6 +129,101 @@ def _kelly_fraction_for(ml_prob: float, kelly_table: pd.DataFrame) -> float:
     return KELLY_FRACTION_FLOOR
 
 
+def simulate(
+    trades_df: pd.DataFrame,
+    kelly_table: pd.DataFrame,
+    max_concurrent: int,
+    label: str,
+) -> tuple[pd.DataFrame, dict]:
+    """Replay trades under a given sizing/concurrency rule.
+
+    Input `trades_df` must have columns: signal_time, ml_prob, pnl_pct, bars_held.
+    Sort order inside the function is by signal_time.
+
+    Sizing per trade: notional = START_EQUITY_USD * kelly_fraction * LEVERAGE.
+    Fees applied as pnl_net_pct = pnl_pct - ROUND_TRIP_FEE before converting to USD.
+
+    Concurrency: prune finished positions, skip new if len(open) >= max_concurrent.
+
+    Returns (ledger_df, metrics_dict).
+    ledger_df columns: signal_time, ml_prob, pnl_pct_gross, pnl_pct_net,
+                       kelly_fraction, notional_usd, pnl_usd, exit_time, taken
+    metrics_dict: trades, skipped_concurrency, wr, pf_net, avg_pnl_pct_net,
+                  total_pnl_usd, total_return_pct, max_dd_pct, label
+    """
+    df = trades_df.sort_values("signal_time").reset_index(drop=True)
+    bar_td = pd.Timedelta(minutes=BAR_MINUTES)
+
+    ledger_rows = []
+    open_positions: list[pd.Timestamp] = []
+    skipped = 0
+
+    for _, t in df.iterrows():
+        sig_time = t["signal_time"]
+        # Prune finished positions
+        open_positions = [exit_t for exit_t in open_positions if exit_t > sig_time]
+
+        f = _kelly_fraction_for(t["ml_prob"], kelly_table)
+        notional = START_EQUITY_USD * f * LEVERAGE
+        pnl_net = t["pnl_pct"] - ROUND_TRIP_FEE
+        pnl_usd = notional * pnl_net
+        exit_time = sig_time + bar_td * int(t["bars_held"])
+
+        if len(open_positions) >= max_concurrent:
+            skipped += 1
+            ledger_rows.append({
+                "signal_time": sig_time, "ml_prob": t["ml_prob"],
+                "pnl_pct_gross": t["pnl_pct"], "pnl_pct_net": pnl_net,
+                "kelly_fraction": f, "notional_usd": notional,
+                "pnl_usd": 0.0, "exit_time": exit_time, "taken": False,
+            })
+            continue
+
+        open_positions.append(exit_time)
+        ledger_rows.append({
+            "signal_time": sig_time, "ml_prob": t["ml_prob"],
+            "pnl_pct_gross": t["pnl_pct"], "pnl_pct_net": pnl_net,
+            "kelly_fraction": f, "notional_usd": notional,
+            "pnl_usd": pnl_usd, "exit_time": exit_time, "taken": True,
+        })
+
+    ledger = pd.DataFrame(ledger_rows)
+    taken = ledger[ledger["taken"]]
+
+    # Metrics on taken trades only
+    if len(taken) == 0:
+        metrics = {
+            "label": label, "trades": 0, "skipped_concurrency": skipped,
+            "wr": 0.0, "pf_net": 0.0, "avg_pnl_pct_net": 0.0,
+            "total_pnl_usd": 0.0, "total_return_pct": 0.0, "max_dd_pct": 0.0,
+        }
+        return ledger, metrics
+
+    wins = taken[taken["pnl_usd"] > 0]["pnl_usd"]
+    losses = taken[taken["pnl_usd"] <= 0]["pnl_usd"]
+    pf = (wins.sum() / abs(losses.sum())) if len(losses) > 0 and losses.sum() != 0 else float("inf")
+    total_pnl_usd = taken["pnl_usd"].sum()
+
+    # Max drawdown on cumulative USD equity curve
+    equity = START_EQUITY_USD + taken["pnl_usd"].cumsum()
+    running_max = equity.cummax()
+    dd = (equity - running_max) / running_max
+    max_dd = float(dd.min()) * 100.0  # negative number
+
+    metrics = {
+        "label": label,
+        "trades": int(len(taken)),
+        "skipped_concurrency": int(skipped),
+        "wr": float((taken["pnl_usd"] > 0).mean()),
+        "pf_net": float(pf) if pf != float("inf") else float("inf"),
+        "avg_pnl_pct_net": float(taken["pnl_pct_net"].mean()),
+        "total_pnl_usd": float(total_pnl_usd),
+        "total_return_pct": float(total_pnl_usd / START_EQUITY_USD * 100.0),
+        "max_dd_pct": max_dd,
+    }
+    return ledger, metrics
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 

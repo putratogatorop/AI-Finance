@@ -4,13 +4,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from backtest_v2_resized import _kelly_fraction_for, build_kelly_table  # noqa: E402
+from backtest_v2_resized import _kelly_fraction_for, build_kelly_table, simulate  # noqa: E402
 
 
 def _make_trades(rows):
@@ -114,3 +115,65 @@ def test_kelly_fraction_below_range_uses_floor():
         {"bin_low": 0.70, "bin_high": 0.75, "f_capped": 0.03},
     ])
     assert _kelly_fraction_for(0.50, tbl) == 0.02  # KELLY_FRACTION_FLOOR
+
+
+def test_simulate_flat_sizing_when_kelly_table_all_equal():
+    """When kelly_table has same f_capped in every bin, result = flat sizing."""
+    rows = [
+        ("2025-06-01T00:00:00Z", 0.80, 0.03, 20),   # +3%
+        ("2025-06-01T06:00:00Z", 0.85, -0.01, 20),  # -1%
+    ]
+    df = _make_trades(rows)
+    flat_tbl = pd.DataFrame([
+        {"bin_low": lo, "bin_high": hi, "f_capped": 0.05}
+        for lo, hi in zip([0.70, 0.75, 0.80, 0.85, 0.90], [0.75, 0.80, 0.85, 0.90, 1.01])
+    ])
+    ledger, metrics = simulate(df, flat_tbl, max_concurrent=5, label="test")
+    # Both trades taken: trade 1 at 0.05 * 600 * 5 = 150 notional, pnl net = 0.03-0.0012 = 0.0288
+    # trade 1 pnl_usd = 150 * 0.0288 = 4.32
+    # trade 2 pnl net = -0.01 - 0.0012 = -0.0112, pnl_usd = 150 * -0.0112 = -1.68
+    assert len(ledger) == 2
+    assert ledger.iloc[0]["pnl_usd"] == pytest.approx(4.32, abs=0.01)
+    assert ledger.iloc[1]["pnl_usd"] == pytest.approx(-1.68, abs=0.01)
+    assert metrics["trades"] == 2
+    assert metrics["wr"] == 0.5
+
+
+def test_simulate_concurrency_drops_overlapping_signals():
+    """When MAX_CONCURRENT=1, second simultaneous signal is dropped."""
+    rows = [
+        ("2025-06-01T00:00:00Z", 0.80, 0.03, 20),   # exits at 00:00 + 20*15 = 05:00
+        ("2025-06-01T01:00:00Z", 0.80, 0.05, 20),   # opens before first exits
+        ("2025-06-01T10:00:00Z", 0.80, 0.02, 20),   # opens after first exits
+    ]
+    df = _make_trades(rows)
+    flat_tbl = pd.DataFrame([
+        {"bin_low": lo, "bin_high": hi, "f_capped": 0.05}
+        for lo, hi in zip([0.70, 0.75, 0.80, 0.85, 0.90], [0.75, 0.80, 0.85, 0.90, 1.01])
+    ])
+    ledger, metrics = simulate(df, flat_tbl, max_concurrent=1, label="test")
+    # Trade 1 taken. Trade 2 dropped (concurrent). Trade 3 taken.
+    assert metrics["trades"] == 2
+    assert metrics["skipped_concurrency"] == 1
+
+
+def test_simulate_kelly_fractions_scale_notional():
+    """Two trades with different ml_probs get proportionally different notionals."""
+    rows = [
+        ("2025-06-01T00:00:00Z", 0.72, 0.03, 20),   # f=0.02 -> 60 notional
+        ("2025-06-01T10:00:00Z", 0.92, 0.03, 20),   # f=0.10 -> 300 notional
+    ]
+    df = _make_trades(rows)
+    stepped_tbl = pd.DataFrame([
+        {"bin_low": 0.70, "bin_high": 0.75, "f_capped": 0.02},
+        {"bin_low": 0.75, "bin_high": 0.80, "f_capped": 0.05},
+        {"bin_low": 0.80, "bin_high": 0.85, "f_capped": 0.05},
+        {"bin_low": 0.85, "bin_high": 0.90, "f_capped": 0.05},
+        {"bin_low": 0.90, "bin_high": 1.01, "f_capped": 0.10},
+    ])
+    ledger, metrics = simulate(df, stepped_tbl, max_concurrent=5, label="test")
+    # Trade 1: notional = 600 * 0.02 * 5 = 60. pnl_usd = 60 * 0.0288 = 1.728
+    # Trade 2: notional = 600 * 0.10 * 5 = 300. pnl_usd = 300 * 0.0288 = 8.64
+    assert ledger.iloc[0]["notional_usd"] == pytest.approx(60.0)
+    assert ledger.iloc[1]["notional_usd"] == pytest.approx(300.0)
+    assert ledger.iloc[1]["pnl_usd"] == pytest.approx(8.64, abs=0.01)
