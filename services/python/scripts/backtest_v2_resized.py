@@ -72,6 +72,55 @@ CROSSCHECK_THRESHOLDS = [0.70, 0.72, 0.75, 0.78, 0.80, 0.85, 0.88, 0.90]
 BAR_MINUTES = 15
 
 
+def build_kelly_table(pre_oot_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute per-bin half-Kelly fraction from pre-OOT trades.
+
+    For each [bin_low, bin_high) bin in KELLY_BIN_EDGES:
+      p = win_rate_in_bin (empirical)
+      b = avg_winner_pnl / |avg_loser_pnl|  (empirical)
+      f_raw = p - (1-p)/b                    (full Kelly)
+      f_half = f_raw * KELLY_MULTIPLIER
+      f_capped = clip(f_half, FLOOR, CAP)
+
+    Empty bins (or bins with no losers / no winners) fall back to FLOOR.
+    Returns DataFrame with columns:
+      bin_low, bin_high, trades, p, b, f_raw, f_half, f_capped
+    """
+    rows = []
+    for lo, hi in zip(KELLY_BIN_EDGES[:-1], KELLY_BIN_EDGES[1:], strict=False):
+        mask = (pre_oot_df["ml_prob"] >= lo) & (pre_oot_df["ml_prob"] < hi)
+        sub = pre_oot_df.loc[mask, "pnl_pct"]
+        trades = len(sub)
+        if trades == 0:
+            rows.append({
+                "bin_low": lo, "bin_high": hi, "trades": 0,
+                "p": 0.0, "b": 0.0,
+                "f_raw": 0.0, "f_half": 0.0, "f_capped": KELLY_FRACTION_FLOOR,
+            })
+            continue
+        wins = sub[sub > 0]
+        losses = sub[sub <= 0]
+        p = len(wins) / trades
+        avg_win = wins.mean() if len(wins) > 0 else 0.0
+        avg_loss = abs(losses.mean()) if len(losses) > 0 else 0.0
+        if avg_loss == 0 or len(losses) == 0:
+            # No losers in this bin. Full Kelly is +inf; half still clips to CAP.
+            f_raw, f_half = 1.0, KELLY_MULTIPLIER
+            b = float("inf")
+        elif avg_win == 0:
+            f_raw, f_half, b = 0.0, 0.0, 0.0
+        else:
+            b = avg_win / avg_loss
+            f_raw = p - (1.0 - p) / b
+            f_half = f_raw * KELLY_MULTIPLIER
+        f_capped = float(np.clip(f_half, KELLY_FRACTION_FLOOR, KELLY_FRACTION_CAP))
+        rows.append({
+            "bin_low": lo, "bin_high": hi, "trades": trades,
+            "p": p, "b": b, "f_raw": f_raw, "f_half": f_half, "f_capped": f_capped,
+        })
+    return pd.DataFrame(rows)
+
+
 def main():
     raise NotImplementedError("Filled in by later tasks")
 
