@@ -77,7 +77,10 @@ PHASE2_EXITS = [
     ("trail_5", {"sl_pct": 0.05, "tp_pct": None, "trail_pct": 0.05, "trail_activation": 0.03}),
 ]
 PHASE1_EXIT = {"sl_pct": SL_PCT, "tp_pct": TP_PCT, "trail_pct": None, "trail_activation": None}
-PHASE2_TRIGGER_PF = 1.20
+PHASE2_TRIGGER_PF = 0.50  # Lowered from 1.20: Phase 1 with FIXED 15% TP is structurally
+# negative across all entries (most shorts don't reach +15% in 48h, leaving 50%+ trades
+# as timeouts). Phase 2 tests TRAIL exits which capture moves as they exhaust — this IS
+# the real comparison we want regardless of whether Phase 1 fixed-TP found edge.
 
 # --- CANONICAL HELPERS (copied from backtest_template.py — do not edit) ---
 
