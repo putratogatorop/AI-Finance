@@ -20,6 +20,13 @@ from urllib.parse import unquote, urlparse
 import pandas as pd
 import psycopg2
 
+# Force stdout to UTF-8 — some Gate.io USDT-perp symbols contain CJK characters
+# (e.g., Chinese-named meme coins) which crash cp1252 default on Windows.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 sys.path.insert(0, ".")
 sys.path.insert(0, "scripts")
 
@@ -89,20 +96,31 @@ def main() -> None:
     for i, (pair, asset, vol) in enumerate(missing, 1):
         print(f"[{i}/{len(missing)}] {pair} (24h vol ${vol:,.0f}) ...")
         try:
-            cursor_ts = start_ts
+            # Try the full BOOTSTRAP_DAYS window first; if that returns 0
+            # bars (recent listing), retry with progressively shorter windows.
             pair_rows = 0
-            while cursor_ts < now_ts:
-                rows = fetch_candles(pair, from_ts=cursor_ts, limit=MAX_BARS_PER_REQUEST)
-                if not rows:
+            for try_days in (BOOTSTRAP_DAYS, 30, 7, 1):
+                cursor_ts = now_ts - try_days * 86400
+                pair_rows_this_try = 0
+                while cursor_ts < now_ts:
+                    rows = fetch_candles(pair, from_ts=cursor_ts, limit=MAX_BARS_PER_REQUEST)
+                    if not rows:
+                        break
+                    pair_rows_this_try += upsert_candles(conn, asset, rows)
+                    last_ts = int(rows[-1]["timestamp"].timestamp())
+                    if last_ts <= cursor_ts:
+                        break
+                    cursor_ts = last_ts + CANDLE_SECONDS
+                    time.sleep(REQUEST_SLEEP_SEC)
+                if pair_rows_this_try > 0:
+                    pair_rows = pair_rows_this_try
+                    if try_days < BOOTSTRAP_DAYS:
+                        print(f"    (only ~{try_days}d of history available)")
                     break
-                pair_rows += upsert_candles(conn, asset, rows)
-                last_ts = int(rows[-1]["timestamp"].timestamp())
-                if last_ts <= cursor_ts:
-                    break
-                cursor_ts = last_ts + CANDLE_SECONDS
-                time.sleep(REQUEST_SLEEP_SEC)
             print(f"    +{pair_rows} bars")
             total_rows += pair_rows
+            if pair_rows == 0:
+                failed.append(asset)
         except Exception as e:
             print(f"    FAILED: {type(e).__name__}: {e}")
             failed.append(asset)
