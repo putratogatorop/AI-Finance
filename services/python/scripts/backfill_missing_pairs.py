@@ -10,10 +10,12 @@ Run from services/python/:
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pandas as pd
 import psycopg2
@@ -24,11 +26,25 @@ sys.path.insert(0, "scripts")
 from ingest_candles import (  # noqa: E402, I001
     BOOTSTRAP_DAYS,
     CANDLE_SECONDS,
-    DB_CONN,
     MAX_BARS_PER_REQUEST,
     REQUEST_SLEEP_SEC,
     fetch_candles,
     upsert_candles,
+)
+
+# Build DB_CONN locally with URL-decoded password (ingest_candles.py's DB_CONN
+# leaves the password URL-encoded — works for SQLAlchemy callers but not for
+# direct psycopg2.connect, which expects the literal raw password).
+_DB_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market"
+)
+_p = urlparse(_DB_URL)
+DB_CONN = dict(
+    host=_p.hostname,
+    port=_p.port or 5432,
+    dbname=(_p.path or "/").lstrip("/"),
+    user=_p.username,
+    password=unquote(_p.password) if _p.password else None,
 )
 
 LEVERAGED_RE = re.compile(r"[35][LS]_USDT$")
