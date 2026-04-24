@@ -1,4 +1,46 @@
-# Bigmover Signal Research — 2026-04-23
+# SUPERSEDED 2026-04-23
+
+> **This research contains a look-ahead bias.** The `multi_bar_confirm`
+> detector used `close.shift(-1)` (peeks 1 bar into the future), and all three
+> signals entered at `open_[i]` while computing masks from `close[i]` (1-bar
+> timing leak). Fixed and retired via:
+>
+> - Shared leak-free module: `services/python/src/ml/bigmover_signals.py`
+>   with regression test in `services/python/tests/test_bigmover_signals.py`
+> - Leak-free 3y reference: `backtest_bigmover_longshort_3y_leakfix.py`
+>   (also re-runs self-check at startup)
+>
+> **Corrected headline numbers on the same 2026-04-24 snapshot** (net of
+> 0.12% round-trip fee + 50 bps SL slippage, entry at open[i+1], classifier
+> retrained on holdout shortened to end 2026-01-23 so the grid's OOT window
+> is truly classifier-unseen):
+>
+> | Artifact | File |
+> |---|---|
+> | Leak-free 3y (6 variants) | `_longshort_3y_leakfix_summary_57bcc40d_20260423T162458Z.csv` |
+> | Leak-free sizing sweep (36 variants) | `_sizing_sweep_summary_cd7102c0_20260424T034428Z.csv` |
+> | Leak-free compounding (8 scenarios) | `_compounding_summary_cd7102c0_20260424T034500Z.csv` |
+> | Leak-free 87-variant ML grid | `_grid_summary_bigmover_ml_v1_73760c74_20260424T035336Z.csv` |
+>
+> **All 6 long+short 3y variants PF 0.84-0.93. All 36 sizing variants PF 0.84-0.95.
+> All 8 compounding accounts liquidate to ~$0 from $100 start. Zero of 87 ML
+> grid variants clear the CLAUDE.md ship floor of PF_p5 >= 1.30 on a
+> classifier-unseen 3-month OOT.** The family has no live edge.
+>
+> **Paper trading:** `BIGMOVER_ACCOUNTS` in
+> `services/python/scripts/paper_executor.py` disabled on 2026-04-23 (each
+> entry carries `"enabled": False`). Open bigmover positions drain naturally
+> via SL / trail / 48h timeout; the check_and_close_trades loop continues to
+> tick after disable. Do NOT re-enable without a clean backtest per
+> CLAUDE.md's Tighter Backtest Standard (all 8 gates).
+>
+> The `PF 2.85`, `+3,035%`, `zero losing months`, `$2.8e+20 uncapped
+> compounding` claims below are **invalid** — they were products of the
+> look-ahead bias.
+
+---
+
+# Bigmover Signal Research — 2026-04-23 (SUPERSEDED)
 
 ## What this folder contains
 
