@@ -49,6 +49,18 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, ".")
 
+from src.ml.bigmover_signals import (  # noqa: E402
+    ACCEL_MULT_OF_ATR as TWEAK4_ACCEL_MULT_OF_ATR,
+    ATR_PERIOD,
+    PRICE_LOOKBACK,
+    PRICE_MOVE_THRESH,
+    VOL_MA_PERIOD,
+    VOL_SPIKE,
+    baseline_entry_mask_short,
+    compute_atr,
+    detect_signal,
+)
+
 # Module-level names to exclude from params.json even though they're UPPERCASE.
 _NON_PARAM_NAMES = frozenset({"UTC"})
 
@@ -63,14 +75,8 @@ TOP_N = 100
 MIN_QUOTE_VOL_24H = 500_000
 LEVERAGED_TOKEN_RE = r"[35][LS]_USDT$"
 
-# --- Detector params ---
-VOL_SPIKE = 3.0
-PRICE_MOVE_THRESH = 0.05
-VOL_MA_PERIOD = 20
-PRICE_LOOKBACK = 96
-ATR_PERIOD = 14
+# Portfolio-level cooldown (detector params come from src.ml.bigmover_signals).
 COOLDOWN_BARS = 96
-TWEAK4_ACCEL_MULT_OF_ATR = 1.0  # price_accel_atr filter
 
 # --- Portfolio ---
 MAX_CONCURRENT_POSITIONS = 5
@@ -323,55 +329,12 @@ def apply_universe_filter(universe_df: pd.DataFrame) -> set[str]:
     return set(df["symbol"].str.replace("_", "", regex=False).tolist())
 
 
-def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
-
-
-def baseline_entry_mask(df: pd.DataFrame) -> pd.Series:
-    close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    volume = df["volume"].astype(float)
-    n = len(df)
-    out = pd.Series([False] * n, index=df.index)
-    if n < PRICE_LOOKBACK + VOL_MA_PERIOD:
-        return out
-    vol_ma = volume.rolling(VOL_MA_PERIOD).mean()
-    rolling_high = high.rolling(PRICE_LOOKBACK).max()
-    rolling_low = low.rolling(PRICE_LOOKBACK).min()
-    price_drop = (rolling_high - close) / rolling_high
-    price_rise = (close - rolling_low) / rolling_low
-    vol_ratio = volume / vol_ma
-    return (
-        (vol_ratio >= VOL_SPIKE)
-        & (price_drop >= PRICE_MOVE_THRESH)
-        & (price_drop > price_rise)
-    ).fillna(False)
-
-
-def detect_signal(df: pd.DataFrame, signal: str, atr: pd.Series) -> pd.Series:
-    """Return entry mask for one of: baseline, price_accel_atr, multi_bar_confirm."""
-    base = baseline_entry_mask(df)
-    if signal == "baseline":
-        return base
-    if signal == "price_accel_atr":
-        prev_close = df["close"].shift(1)
-        prev_prev = df["close"].shift(2)
-        accel = (df["close"] - prev_close) - (prev_close - prev_prev)
-        return base & (accel.abs() >= atr * TWEAK4_ACCEL_MULT_OF_ATR)
-    if signal == "multi_bar_confirm":
-        next_close = df["close"].shift(-1)
-        return (base & (next_close < df["close"])).fillna(False)
-    raise ValueError(f"unknown signal: {signal}")
+# compute_atr, baseline_entry_mask_short, and detect_signal come from
+# src.ml.bigmover_signals. This grid is short-only — callers below pass
+# direction="short" to the shared detect_signal. The original local
+# `baseline_entry_mask` (no suffix) was short-only; the shared
+# baseline_entry_mask_short is its byte-equivalent successor.
+baseline_entry_mask = baseline_entry_mask_short  # compat alias for any legacy callsite
 
 
 def simulate_portfolio(
@@ -740,7 +703,7 @@ def detect_and_score_signals(
 
     for asset, df in candles_by_asset.items():
         atr = compute_atr(df)
-        mask = detect_signal(df, signal_name, atr)
+        mask = detect_signal(df, signal_name, "short", atr)
         in_oot = (df["timestamp"] >= oot_start_ts) & (df["timestamp"] <= oot_end_ts)
         mask = mask & in_oot
         if not mask.any():
@@ -874,7 +837,7 @@ def simulate_pre_oot_for_kelly(
     detected_tuples: list[tuple[str, int]] = []
     for asset, df in candles_by_asset.items():
         atr = compute_atr(df)
-        mask = detect_signal(df, signal_name, atr)
+        mask = detect_signal(df, signal_name, "short", atr)
         in_pre = df["timestamp"] < oot_start_ts
         mask = mask & in_pre
         if not mask.any():

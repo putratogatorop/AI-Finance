@@ -28,6 +28,17 @@ import pandas as pd
 
 sys.path.insert(0, ".")
 
+from src.ml.bigmover_signals import (  # noqa: E402
+    ACCEL_MULT_OF_ATR,
+    ATR_PERIOD,
+    PRICE_LOOKBACK,
+    PRICE_MOVE_THRESH,
+    VOL_MA_PERIOD,
+    VOL_SPIKE,
+    compute_atr,
+    detect_signal,
+)
+
 # =============================================================================
 # CONSTANTS (same as longshort_3y)
 # =============================================================================
@@ -38,13 +49,8 @@ TOP_N = 100
 MIN_QUOTE_VOL_24H = 500_000
 LEVERAGED_TOKEN_RE = r"[35][LS]_USDT$"
 
-VOL_SPIKE = 3.0
-PRICE_MOVE_THRESH = 0.05
-VOL_MA_PERIOD = 20
-PRICE_LOOKBACK = 96
-ATR_PERIOD = 14
+# Portfolio-level cooldown (detector params come from src.ml.bigmover_signals).
 COOLDOWN_BARS = 96
-ACCEL_MULT_OF_ATR = 1.0
 
 MAX_CONCURRENT_POSITIONS = 5
 WORST_FILL_BUFFER = 0.005
@@ -125,15 +131,6 @@ def apply_universe_filter(universe_df):
     return set(df["symbol"].str.replace("_", "", regex=False).tolist())
 
 
-def compute_atr(df, period=ATR_PERIOD):
-    high, low, close = df["high"].astype(float), df["low"].astype(float), df["close"].astype(float)
-    prev_close = close.shift(1)
-    tr = pd.concat(
-        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
-    ).max(axis=1)
-    return tr.rolling(period).mean()
-
-
 def compute_listing_gates(candles_by_asset):
     gates = {}
     warmup_s = LISTING_WARMUP_DAYS * 86400
@@ -144,42 +141,12 @@ def compute_listing_gates(candles_by_asset):
     return gates
 
 
-# =============================================================================
-# DETECTORS (copy of multi_bar_confirm only, both directions)
-# =============================================================================
-
-
-def baseline_entry_mask(df, direction):
-    close, high, low = df["close"].astype(float), df["high"].astype(float), df["low"].astype(float)
-    volume = df["volume"].astype(float)
-    n = len(df)
-    out = pd.Series([False] * n, index=df.index)
-    if n < PRICE_LOOKBACK + VOL_MA_PERIOD:
-        return out
-    vol_ma = volume.rolling(VOL_MA_PERIOD).mean()
-    rolling_high = high.rolling(PRICE_LOOKBACK).max()
-    rolling_low = low.rolling(PRICE_LOOKBACK).min()
-    price_drop = (rolling_high - close) / rolling_high
-    price_rise = (close - rolling_low) / rolling_low
-    vol_ratio = volume / vol_ma
-    if direction == "short":
-        return (
-            (vol_ratio >= VOL_SPIKE)
-            & (price_drop >= PRICE_MOVE_THRESH)
-            & (price_drop > price_rise)
-        ).fillna(False)
-    return (
-        (vol_ratio >= VOL_SPIKE)
-        & (price_rise >= PRICE_MOVE_THRESH)
-        & (price_rise > price_drop)
-    ).fillna(False)
+# Signal detection comes from src.ml.bigmover_signals.detect_signal. This
+# script uses only the multi_bar_confirm dispatch.
 
 
 def detect_multi_bar_confirm(df, direction):
-    base = baseline_entry_mask(df, direction)
-    nxt = df["close"].shift(-1)
-    confirm = (nxt < df["close"]) if direction == "short" else (nxt > df["close"])
-    return (base & confirm).fillna(False)
+    return detect_signal(df, "multi_bar_confirm", direction, compute_atr(df))
 
 
 # =============================================================================

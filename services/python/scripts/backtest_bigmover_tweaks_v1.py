@@ -281,18 +281,12 @@ def apply_universe_filter(universe_df: pd.DataFrame) -> set[str]:
     return set(df["symbol"].str.replace("_", "", regex=False).tolist())
 
 
-def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
-    """SMA-based ATR over `period` bars from OHLC."""
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+# compute_atr, baseline_entry_mask, detect_signal come from src.ml.bigmover_signals.
+from src.ml.bigmover_signals import (  # noqa: E402
+    baseline_entry_mask_short as baseline_entry_mask,
+    compute_atr,
+    detect_signal,
+)
 
 
 def simulate_portfolio(
@@ -483,31 +477,6 @@ def monte_carlo_pf(trades_df: pd.DataFrame, n_iter: int = MC_ITER, seed: int = M
 # ---------------------------------------------------------------------------
 
 
-def baseline_entry_mask(df: pd.DataFrame) -> pd.Series:
-    """Vol-spike + price-drop bearish dominance — mirror of detect_vol_spike from
-    backtest_short_grid_v1.py (DO NOT change; this is the production baseline).
-    """
-    close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    volume = df["volume"].astype(float)
-    n = len(df)
-    out = pd.Series([False] * n, index=df.index)
-    if n < PRICE_LOOKBACK + VOL_MA_PERIOD:
-        return out
-    vol_ma = volume.rolling(VOL_MA_PERIOD).mean()
-    rolling_high = high.rolling(PRICE_LOOKBACK).max()
-    rolling_low = low.rolling(PRICE_LOOKBACK).min()
-    price_drop = (rolling_high - close) / rolling_high
-    price_rise = (close - rolling_low) / rolling_low
-    vol_ratio = volume / vol_ma
-    return (
-        (vol_ratio >= VOL_SPIKE)
-        & (price_drop >= PRICE_MOVE_THRESH)
-        & (price_drop > price_rise)
-    ).fillna(False)
-
-
 def detect_with_tweak(df: pd.DataFrame, tweak: str, atr: pd.Series) -> pd.Series:
     """Return entry mask for a given tweak, layered on top of the baseline.
 
@@ -534,11 +503,11 @@ def detect_with_tweak(df: pd.DataFrame, tweak: str, atr: pd.Series) -> pd.Series
         score = vol_ratio / 5.0
         return base & (score >= 0.55)
 
-    if tweak == "price_accel_atr":
-        prev_close = df["close"].shift(1)
-        prev_prev = df["close"].shift(2)
-        accel = (df["close"] - prev_close) - (prev_close - prev_prev)
-        return base & (accel.abs() >= atr * TWEAK4_ACCEL_MULT_OF_ATR)
+    if tweak in ("price_accel_atr", "multi_bar_confirm"):
+        # Delegate to leak-free shared detector; this script is short-only.
+        return detect_signal(
+            df, tweak, "short", atr, accel_mult_of_atr=TWEAK4_ACCEL_MULT_OF_ATR
+        )
 
     if tweak == "vol_4bar_momentum":
         # Union: baseline OR (vol_spike AND 4-bar downtrend >= 2%)
@@ -549,13 +518,6 @@ def detect_with_tweak(df: pd.DataFrame, tweak: str, atr: pd.Series) -> pd.Series
         ret4 = (df["close"] - prev4) / prev4.replace(0, float("nan"))
         secondary = (ratio >= VOL_SPIKE) & (ret4 < -0.02)
         return (base | secondary).fillna(False)
-
-    if tweak == "multi_bar_confirm":
-        # Require base signal AND next bar closes lower (shift(-1) looks ahead — entry is
-        # the bar after signal, so confirmation is known before we act).
-        next_close = df["close"].shift(-1)
-        confirm = next_close < df["close"]
-        return (base & confirm).fillna(False)
 
     # Cross-asset tweaks handled outside this function — return baseline as placeholder.
     # vol_rank_pctl90, btc_correlation, rank_top3_per_bar are all post-processed
