@@ -41,6 +41,22 @@ GATEIO_BASE = "https://api.gateio.ws/api/v4"
 # Multi-threshold paper accounts — each runs independently
 THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60]
 
+# All 5 v2 threshold accounts disabled 2026-04-24. Four-agent audit found:
+#   1. SEVERE survivorship bias — live scanner fetches ALL Gate.io futures
+#      (including 5x leveraged tokens like FARTCOIN5L) while the backtest
+#      universe was ~100 coins in local CSV storage. Model trades coins it
+#      was never trained on.
+#   2. P-hack on threshold selection — PF 5.05 is best-of-6 thresholds
+#      swept on the same walk-forward OOS used for evaluation. No Bonferroni.
+#   3. Exit logic mismatch — backtest used fixed TP (+5% or +10%); paper
+#      executor runs trailing-stop with tp_price=0. The 5/5 winning streak
+#      is measuring a strategy no backtest ever characterized.
+# See docs/research-journal/v2ml-audit-2026-04-24.md for the full report.
+# Flip V2_ENABLED back to True only after fixing (1) universe filter,
+# (2) proper train/test/holdout split with Bonferroni correction, and
+# (3) backtesting the actual trail-stop exit the live executor uses.
+V2_ENABLED = False
+
 # Strategy key for the existing v2 accounts (failed-bounce short scanner).
 V2_STRATEGY = "v2_failed_bounce"
 
@@ -591,17 +607,18 @@ def main():
             v2_sigs = [s for s in new_sigs if s.signal_type is None]
             bm_sigs = [s for s in new_sigs if s.signal_type is not None]
 
-            # v2 accounts (5 ML thresholds)
-            for th in THRESHOLDS:
-                halted = today_pnl_pct(engine, th, V2_STRATEGY) <= -MAX_DAILY_LOSS_PCT
-                if halted:
-                    continue
-                for sig in v2_sigs:
-                    if sig.ml_prob < th:
+            # v2 accounts (5 ML thresholds) — gated by V2_ENABLED flag.
+            if V2_ENABLED:
+                for th in THRESHOLDS:
+                    halted = today_pnl_pct(engine, th, V2_STRATEGY) <= -MAX_DAILY_LOSS_PCT
+                    if halted:
                         continue
-                    if open_positions(engine, th, V2_STRATEGY) >= MAX_OPEN_POSITIONS:
-                        break
-                    open_paper_trade(engine, sig, th, V2_STRATEGY)
+                    for sig in v2_sigs:
+                        if sig.ml_prob < th:
+                            continue
+                        if open_positions(engine, th, V2_STRATEGY) >= MAX_OPEN_POSITIONS:
+                            break
+                        open_paper_trade(engine, sig, th, V2_STRATEGY)
 
             # Bigmover accounts (7 portfolios: 6 single-direction + 1 combined)
             for acct in BIGMOVER_ACCOUNTS:
@@ -629,10 +646,11 @@ def main():
 
             if cycle % 10 == 0:
                 parts = []
-                for th in THRESHOLDS:
-                    eq = current_equity(engine, th, V2_STRATEGY)
-                    op = open_positions(engine, th, V2_STRATEGY)
-                    parts.append(f"v2@{th}=${eq:.0f}({op})")
+                if V2_ENABLED:
+                    for th in THRESHOLDS:
+                        eq = current_equity(engine, th, V2_STRATEGY)
+                        op = open_positions(engine, th, V2_STRATEGY)
+                        parts.append(f"v2@{th}=${eq:.0f}({op})")
                 for acct in BIGMOVER_ACCOUNTS:
                     if not acct.get("enabled", True):
                         continue
