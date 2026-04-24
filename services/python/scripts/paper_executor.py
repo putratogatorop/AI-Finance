@@ -65,23 +65,26 @@ BIGMOVER_NOTIONAL_CAP_USD = float(
 # because bigmover has no ML gate.
 #   strategy_key matches scanner_signals_bigmover.signal_type + direction.
 #   direction=None on the combined account means "accept both sides".
+# All 7 accounts disabled 2026-04-23: their justifying backtest had a look-ahead
+# bias (see src/ml/bigmover_signals.py and the SUPERSEDED header in
+# results/_BIGMOVER_RESEARCH_README.md). Leak-fixed PF is 0.84-0.93, below the
+# 1.30 ship floor. Flip "enabled" to True after a clean backtest passes.
 BIGMOVER_ACCOUNTS: list[dict] = [
     {"strategy": "bigmover_baseline_short",
-     "signal_type": "baseline", "direction": "short"},
+     "signal_type": "baseline", "direction": "short", "enabled": False},
     {"strategy": "bigmover_baseline_long",
-     "signal_type": "baseline", "direction": "long"},
+     "signal_type": "baseline", "direction": "long", "enabled": False},
     {"strategy": "bigmover_price_accel_atr_short",
-     "signal_type": "price_accel_atr", "direction": "short"},
+     "signal_type": "price_accel_atr", "direction": "short", "enabled": False},
     {"strategy": "bigmover_price_accel_atr_long",
-     "signal_type": "price_accel_atr", "direction": "long"},
+     "signal_type": "price_accel_atr", "direction": "long", "enabled": False},
     {"strategy": "bigmover_multi_bar_confirm_short",
-     "signal_type": "multi_bar_confirm", "direction": "short"},
+     "signal_type": "multi_bar_confirm", "direction": "short", "enabled": False},
     {"strategy": "bigmover_multi_bar_confirm_long",
-     "signal_type": "multi_bar_confirm", "direction": "long"},
-    # Combined long+short, shared 5-slot pool. Backtest winner by PF and DD
-    # (PF 3.15, DD -7.7%, +6,825% flat / $8.19M compounding@$100k cap over 3y).
+     "signal_type": "multi_bar_confirm", "direction": "long", "enabled": False},
+    # Combined long+short, shared 5-slot pool.
     {"strategy": "bigmover_multi_bar_confirm_combined",
-     "signal_type": "multi_bar_confirm", "direction": None},
+     "signal_type": "multi_bar_confirm", "direction": None, "enabled": False},
 ]
 BIGMOVER_SENTINEL_THRESHOLD = 1.0  # no ML gate; distinguishes rows from v2 ones
 
@@ -602,6 +605,8 @@ def main():
 
             # Bigmover accounts (7 portfolios: 6 single-direction + 1 combined)
             for acct in BIGMOVER_ACCOUNTS:
+                if not acct.get("enabled", True):
+                    continue
                 halted = today_pnl_pct(
                     engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
                 ) <= -MAX_DAILY_LOSS_PCT
@@ -629,6 +634,8 @@ def main():
                     op = open_positions(engine, th, V2_STRATEGY)
                     parts.append(f"v2@{th}=${eq:.0f}({op})")
                 for acct in BIGMOVER_ACCOUNTS:
+                    if not acct.get("enabled", True):
+                        continue
                     eq = current_equity(
                         engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
                     )
