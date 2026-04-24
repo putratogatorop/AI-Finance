@@ -1,0 +1,3 @@
+direction,pnl_pct,bars_held,symbol,entry_time,exit_time,entry_price,exit_price,peak_pnl_pct,exit_reason,ml_prob,kelly_fraction,notional_usd,pnl_pct_net,pnl_usd
+short,-0.05499999999999991,32,WIFUSDT,1771810200,1771839000,0.199,0.209945,0.0,stop_loss,,0.02,10.0,-0.05619999999999991,-0.5619999999999991
+short,-0.05499999999999998,74,CHZUSDT,1772116200,1772182800,0.03208,0.0338444,0.03522443890274311,stop_loss,,0.02,10.0,-0.05619999999999998,-0.5619999999999998
