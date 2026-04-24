@@ -39,7 +39,10 @@ sys.path.insert(0, ".")
 # =============================================================================
 
 SOURCE_RUN_PREFIX = (
-    "backtest_bigmover_sizing_sweep_v1_abfe8b06_20260423T145954Z__"
+    # Updated 2026-04-23 post-leak-retirement — points at the leak-free sizing
+    # sweep run produced by commit cd7102c0. The prior value
+    # (abfe8b06_20260423T145954Z) referenced leak-biased trades.
+    "backtest_bigmover_sizing_sweep_v1_cd7102c0_20260424T034201Z__"
 )
 ACCOUNTS = [
     {

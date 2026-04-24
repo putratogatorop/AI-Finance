@@ -365,18 +365,19 @@ def simulate_portfolio(
         for i in np.where(mask.values)[0]:
             if i - last_entry_bar < cooldown_bars:
                 continue
-            if i >= n:
+            entry_bar_idx = i + 1  # leak-free: enter on bar after signal
+            if entry_bar_idx >= n:
                 continue
-            entry_price = float(open_[i])
+            entry_price = float(open_[entry_bar_idx])
             if entry_price <= 0:
                 continue
             sl_trigger = entry_price * (1 + sl_pct + WORST_FILL_BUFFER)
             tp_trigger = entry_price * (1 - tp_pct) if tp_pct is not None else None
             peak_low = entry_price
             exit_price = entry_price
-            exit_bar = min(i + MAX_HOLD_BARS, n - 1)
+            exit_bar = min(entry_bar_idx + MAX_HOLD_BARS, n - 1)
             exit_reason = "timeout"
-            for j in range(i + 1, min(i + 1 + MAX_HOLD_BARS, n)):
+            for j in range(entry_bar_idx + 1, min(entry_bar_idx + 1 + MAX_HOLD_BARS, n)):
                 bar_high = high[j]
                 bar_low = low[j]
                 if bar_low < peak_low:
@@ -405,9 +406,9 @@ def simulate_portfolio(
             candidate_trades.append({
                 "direction": "short",
                 "pnl_pct": pnl_pct,
-                "bars_held": exit_bar - i,
+                "bars_held": exit_bar - entry_bar_idx,
                 "symbol": asset,
-                "entry_time": int(ts[i]),
+                "entry_time": int(ts[entry_bar_idx]),
                 "exit_time": int(ts[exit_bar]),
                 "entry_price": entry_price,
                 "exit_price": exit_price,

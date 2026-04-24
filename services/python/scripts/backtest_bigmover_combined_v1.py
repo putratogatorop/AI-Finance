@@ -171,19 +171,22 @@ def simulate_portfolio_bidirectional(
             n = len(df)
             last_entry_bar = -cooldown_bars
             for i in np.where(mask.values)[0]:
-                if i - last_entry_bar < cooldown_bars or i >= n:
+                if i - last_entry_bar < cooldown_bars:
                     continue
-                entry_price = float(open_[i])
+                entry_bar_idx = i + 1  # enter on next bar after signal (leak-free)
+                if entry_bar_idx >= n:
+                    continue
+                entry_price = float(open_[entry_bar_idx])
                 if entry_price <= 0:
                     continue
-                entry_ts = int(ts[i])
+                entry_ts = int(ts[entry_bar_idx])
                 if direction == "short":
                     sl_trigger = entry_price * (1 + sl_pct + WORST_FILL_BUFFER)
                     peak_low = entry_price
                     exit_price = entry_price
-                    exit_bar = min(i + MAX_HOLD_BARS, n - 1)
+                    exit_bar = min(entry_bar_idx + MAX_HOLD_BARS, n - 1)
                     exit_reason = "timeout"
-                    for j in range(i + 1, min(i + 1 + MAX_HOLD_BARS, n)):
+                    for j in range(entry_bar_idx + 1, min(entry_bar_idx + 1 + MAX_HOLD_BARS, n)):
                         bar_high, bar_low = high[j], low[j]
                         if bar_low < peak_low:
                             peak_low = bar_low
@@ -201,9 +204,9 @@ def simulate_portfolio_bidirectional(
                     sl_trigger = entry_price * (1 - sl_pct - WORST_FILL_BUFFER)
                     peak_high = entry_price
                     exit_price = entry_price
-                    exit_bar = min(i + MAX_HOLD_BARS, n - 1)
+                    exit_bar = min(entry_bar_idx + MAX_HOLD_BARS, n - 1)
                     exit_reason = "timeout"
-                    for j in range(i + 1, min(i + 1 + MAX_HOLD_BARS, n)):
+                    for j in range(entry_bar_idx + 1, min(entry_bar_idx + 1 + MAX_HOLD_BARS, n)):
                         bar_high, bar_low = high[j], low[j]
                         if bar_high > peak_high:
                             peak_high = bar_high
@@ -220,7 +223,7 @@ def simulate_portfolio_bidirectional(
                 candidate_trades.append({
                     "direction": direction,
                     "pnl_pct": pnl_pct,
-                    "bars_held": exit_bar - i,
+                    "bars_held": exit_bar - entry_bar_idx,
                     "symbol": asset,
                     "entry_time": entry_ts,
                     "exit_time": int(ts[exit_bar]),
