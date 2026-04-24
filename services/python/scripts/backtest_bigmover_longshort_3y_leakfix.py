@@ -40,6 +40,20 @@ import pandas as pd
 
 sys.path.insert(0, ".")
 
+from src.ml.bigmover_signals import (  # noqa: E402
+    ACCEL_MULT_OF_ATR,
+    ATR_PERIOD,
+    PRICE_LOOKBACK,
+    PRICE_MOVE_THRESH,
+    VOL_MA_PERIOD,
+    VOL_SPIKE,
+    _self_check_no_lookahead,
+    baseline_entry_mask_long,
+    baseline_entry_mask_short,
+    compute_atr,
+    detect_signal,
+)
+
 _NON_PARAM_NAMES = frozenset({"UTC"})
 
 # =============================================================================
@@ -52,13 +66,8 @@ TOP_N = 100
 MIN_QUOTE_VOL_24H = 500_000
 LEVERAGED_TOKEN_RE = r"[35][LS]_USDT$"
 
-VOL_SPIKE = 3.0
-PRICE_MOVE_THRESH = 0.05
-VOL_MA_PERIOD = 20
-PRICE_LOOKBACK = 96
-ATR_PERIOD = 14
+# Portfolio-level cooldown (signal constants come from src.ml.bigmover_signals)
 COOLDOWN_BARS = 96
-ACCEL_MULT_OF_ATR = 1.0
 
 MAX_CONCURRENT_POSITIONS = 5
 WORST_FILL_BUFFER = 0.005
@@ -265,99 +274,10 @@ def apply_universe_filter(universe_df: pd.DataFrame) -> set[str]:
     return set(df["symbol"].str.replace("_", "", regex=False).tolist())
 
 
-def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
-
-
-# =============================================================================
-# SIGNAL DETECTORS (baseline unchanged; multi_bar_confirm leak-fixed)
-# =============================================================================
-
-
-def baseline_entry_mask_short(df: pd.DataFrame) -> pd.Series:
-    close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    volume = df["volume"].astype(float)
-    n = len(df)
-    out = pd.Series([False] * n, index=df.index)
-    if n < PRICE_LOOKBACK + VOL_MA_PERIOD:
-        return out
-    vol_ma = volume.rolling(VOL_MA_PERIOD).mean()
-    rolling_high = high.rolling(PRICE_LOOKBACK).max()
-    rolling_low = low.rolling(PRICE_LOOKBACK).min()
-    price_drop = (rolling_high - close) / rolling_high
-    price_rise = (close - rolling_low) / rolling_low
-    vol_ratio = volume / vol_ma
-    return (
-        (vol_ratio >= VOL_SPIKE)
-        & (price_drop >= PRICE_MOVE_THRESH)
-        & (price_drop > price_rise)
-    ).fillna(False)
-
-
-def baseline_entry_mask_long(df: pd.DataFrame) -> pd.Series:
-    close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    volume = df["volume"].astype(float)
-    n = len(df)
-    out = pd.Series([False] * n, index=df.index)
-    if n < PRICE_LOOKBACK + VOL_MA_PERIOD:
-        return out
-    vol_ma = volume.rolling(VOL_MA_PERIOD).mean()
-    rolling_high = high.rolling(PRICE_LOOKBACK).max()
-    rolling_low = low.rolling(PRICE_LOOKBACK).min()
-    price_drop = (rolling_high - close) / rolling_high
-    price_rise = (close - rolling_low) / rolling_low
-    vol_ratio = volume / vol_ma
-    return (
-        (vol_ratio >= VOL_SPIKE)
-        & (price_rise >= PRICE_MOVE_THRESH)
-        & (price_rise > price_drop)
-    ).fillna(False)
-
-
-def detect_signal(df: pd.DataFrame, signal: str, direction: str, atr: pd.Series) -> pd.Series:
-    """Dispatch to baseline + tweak. Leak-fixed for multi_bar_confirm."""
-    if direction == "short":
-        base = baseline_entry_mask_short(df)
-    elif direction == "long":
-        base = baseline_entry_mask_long(df)
-    else:
-        raise ValueError(f"unknown direction: {direction}")
-
-    if signal == "price_accel_atr":
-        prev_close = df["close"].shift(1)
-        prev_prev = df["close"].shift(2)
-        accel = (df["close"] - prev_close) - (prev_close - prev_prev)
-        return (base & (accel.abs() >= atr * ACCEL_MULT_OF_ATR)).fillna(False)
-
-    if signal == "multi_bar_confirm":
-        # LEAK FIX: original used `close.shift(-1)` to look one bar into the
-        # future and decide whether a baseline at bar `i` should fire. The
-        # simulator then entered at `open[i]`, so that was a 2-bar leak.
-        # Clean formulation: baseline fired on bar `j-1`, confirmed by bar `j`
-        # moving in the trade direction. `mask[j] = True` means entry at
-        # `open[j+1]` (after the simulator shift below) reads only bars <= j.
-        prev_close = df["close"].shift(1)
-        prev_base = base.shift(1).fillna(False)
-        if direction == "short":
-            confirm = df["close"] < prev_close
-        else:
-            confirm = df["close"] > prev_close
-        return (prev_base & confirm).fillna(False)
-
-    raise ValueError(f"unknown signal: {signal}")
+# Signal detectors (compute_atr, baseline_entry_mask_short/long, detect_signal)
+# are imported from src.ml.bigmover_signals. The leak-free multi_bar_confirm
+# was originally prototyped in this file; it moved to the shared module so the
+# other bigmover scripts could adopt it without copy-pasting the bug again.
 
 
 # =============================================================================
@@ -699,65 +619,6 @@ def run_variant(
 
 
 # =============================================================================
-# SELF-CHECK — verify multi_bar_confirm mask is lookahead-free
-# =============================================================================
-
-
-def _self_check_multi_bar_confirm_no_lookahead() -> None:
-    """Mutating future close values must not change past mask values."""
-    rng = np.random.default_rng(12345)
-    n_bars = PRICE_LOOKBACK + VOL_MA_PERIOD + 100
-    base_close = 100 + rng.normal(0, 1, n_bars).cumsum()
-    df = pd.DataFrame({
-        "timestamp": np.arange(n_bars, dtype=np.int64) * 900,
-        "open": base_close,
-        "high": base_close + np.abs(rng.normal(0, 0.5, n_bars)),
-        "low": base_close - np.abs(rng.normal(0, 0.5, n_bars)),
-        "close": base_close,
-        "volume": rng.uniform(1, 10, n_bars),
-    })
-    atr_a = compute_atr(df)
-    mask_a_short = detect_signal(df, "multi_bar_confirm", "short", atr_a)
-    mask_a_long = detect_signal(df, "multi_bar_confirm", "long", atr_a)
-
-    cut = n_bars - 30
-    df_mut = df.copy()
-    # Replace the tail with something wildly different
-    df_mut.loc[cut:, "close"] = df_mut.loc[cut:, "close"] * 3.0
-    df_mut.loc[cut:, "open"] = df_mut.loc[cut:, "open"] * 3.0
-    df_mut.loc[cut:, "high"] = df_mut.loc[cut:, "high"] * 3.0
-    df_mut.loc[cut:, "low"] = df_mut.loc[cut:, "low"] * 3.0
-    df_mut.loc[cut:, "volume"] = df_mut.loc[cut:, "volume"] * 5.0
-    atr_b = compute_atr(df_mut)
-    mask_b_short = detect_signal(df_mut, "multi_bar_confirm", "short", atr_b)
-    mask_b_long = detect_signal(df_mut, "multi_bar_confirm", "long", atr_b)
-
-    # mask values at indices strictly before `cut` must not depend on mutated bars.
-    # baseline uses rolling windows (period=20 for volume, 96 for price), so it
-    # can only "see" back `max(period)` bars. As long as our check index is
-    # `cut - 1` (one bar before the mutation), no past rolling aggregate
-    # references a mutated bar. For safety, check all indices < cut.
-    idx = slice(0, cut)
-    if not (mask_a_short.iloc[idx].values == mask_b_short.iloc[idx].values).all():
-        first_diff = np.where(
-            mask_a_short.iloc[idx].values != mask_b_short.iloc[idx].values
-        )[0]
-        raise AssertionError(
-            f"LEAK REGRESSION (short): multi_bar_confirm mask at past bars changed "
-            f"after mutating future bars. First diff at idx={int(first_diff[0])}"
-        )
-    if not (mask_a_long.iloc[idx].values == mask_b_long.iloc[idx].values).all():
-        first_diff = np.where(
-            mask_a_long.iloc[idx].values != mask_b_long.iloc[idx].values
-        )[0]
-        raise AssertionError(
-            f"LEAK REGRESSION (long): multi_bar_confirm mask at past bars changed "
-            f"after mutating future bars. First diff at idx={int(first_diff[0])}"
-        )
-    print("[leakfix] self-check PASS: multi_bar_confirm mask uses only past bars")
-
-
-# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -767,7 +628,8 @@ def main() -> None:
     random.seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
 
-    _self_check_multi_bar_confirm_no_lookahead()
+    _self_check_no_lookahead()
+    print("[leakfix] self-check PASS: bigmover signals use only past bars")
 
     overall_start = _time.monotonic()
     git_dirty_at_start = _git_dirty()
