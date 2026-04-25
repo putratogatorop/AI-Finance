@@ -1,0 +1,33 @@
+{
+  "avg_pnl_pct": 7.09688899262313e-05,
+  "by_direction": {
+    "long": {
+      "avg_pnl_pct": 0.0,
+      "median_hold_bars": 0.0,
+      "pf": 0.0,
+      "total_pnl_pct": 0.0,
+      "trades": 0,
+      "wr": 0.0
+    },
+    "short": {
+      "avg_pnl_pct": 7.09688899262313e-05,
+      "median_hold_bars": 215.0,
+      "pf": 1.0021267731537535,
+      "total_pnl_pct": 0.9475056494051142,
+      "trades": 13351,
+      "wr": 0.32941352707662347
+    }
+  },
+  "drop_at_entry": {
+    "mean": 0.030575808054970486,
+    "median": 0.021523178807946946,
+    "n": 13351,
+    "pct_under_2pct_drop": 0.4650587970938507,
+    "pct_under_5pct_drop": 0.8451801363193768
+  },
+  "median_hold_bars": 215.0,
+  "pf": 1.0021267731537535,
+  "total_pnl_pct": 0.9475056494051142,
+  "trades": 13351,
+  "wr": 0.32941352707662347
+}

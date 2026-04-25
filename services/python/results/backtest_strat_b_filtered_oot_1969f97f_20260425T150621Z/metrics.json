@@ -1,0 +1,82 @@
+{
+  "oot": {
+    "avg_pnl_pct": 0.02963618699849666,
+    "by_direction": {
+      "long": {
+        "avg_pnl_pct": 0.0,
+        "median_hold_bars": 0.0,
+        "pf": 0.0,
+        "total_pnl_pct": 0.0,
+        "trades": 0,
+        "wr": 0.0
+      },
+      "short": {
+        "avg_pnl_pct": 0.02963618699849666,
+        "median_hold_bars": 465.0,
+        "pf": 2.185659769669424,
+        "total_pnl_pct": 4.119429992791035,
+        "trades": 139,
+        "wr": 0.5035971223021583
+      }
+    },
+    "median_hold_bars": 465.0,
+    "pf": 2.185659769669424,
+    "total_pnl_pct": 4.119429992791035,
+    "trades": 139,
+    "wr": 0.5035971223021583
+  },
+  "oot_passes_ship_floor": true,
+  "overall": {
+    "avg_pnl_pct": 0.004862260156138248,
+    "by_direction": {
+      "long": {
+        "avg_pnl_pct": 0.0,
+        "median_hold_bars": 0.0,
+        "pf": 0.0,
+        "total_pnl_pct": 0.0,
+        "trades": 0,
+        "wr": 0.0
+      },
+      "short": {
+        "avg_pnl_pct": 0.004862260156138248,
+        "median_hold_bars": 199.0,
+        "pf": 1.1500038456463657,
+        "total_pnl_pct": 23.40692039164953,
+        "trades": 4814,
+        "wr": 0.3493975903614458
+      }
+    },
+    "median_hold_bars": 199.0,
+    "pf": 1.1500038456463657,
+    "total_pnl_pct": 23.40692039164953,
+    "trades": 4814,
+    "wr": 0.3493975903614458
+  },
+  "ship_floor_pf": 1.3,
+  "train": {
+    "avg_pnl_pct": 0.004125666395477751,
+    "by_direction": {
+      "long": {
+        "avg_pnl_pct": 0.0,
+        "median_hold_bars": 0.0,
+        "pf": 0.0,
+        "total_pnl_pct": 0.0,
+        "trades": 0,
+        "wr": 0.0
+      },
+      "short": {
+        "avg_pnl_pct": 0.004125666395477751,
+        "median_hold_bars": 195.0,
+        "pf": 1.1264191773178989,
+        "total_pnl_pct": 19.287490398858488,
+        "trades": 4675,
+        "wr": 0.3448128342245989
+      }
+    },
+    "median_hold_bars": 195.0,
+    "pf": 1.1264191773178989,
+    "total_pnl_pct": 19.287490398858488,
+    "trades": 4675,
+    "wr": 0.3448128342245989
+  }
+}
