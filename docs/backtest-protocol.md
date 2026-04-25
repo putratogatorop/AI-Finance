@@ -58,6 +58,40 @@ In both cases: do not overwrite the old `results/<run_id>/`. Write a new one and
 
 While you're still writing the strategy block, `git_dirty: true` will appear in metadata. That's fine for iteration. But before you publish a number as "the result," commit the script first so the run has a clean SHA.
 
+## Predictor artifact contract
+
+When a backtest gates trades by a trained model, both the model and its
+threshold must be reproducible from artifacts checked into git. The
+contract for any predictor-gated backtest:
+
+1. **Model artifact** lives at `services/python/models/<name>_v<N>.joblib`.
+   It is a callable supporting `predict_proba(X) -> array of shape (n, 2)`,
+   typically a `sklearn.pipeline.Pipeline`. Inputs are floats in the order
+   declared by the meta JSON (next).
+2. **Meta JSON** lives at `services/python/models/<name>_v<N>_meta.json` and
+   contains at minimum: `feature_names` (ordered list), `label_thresholds`
+   (the labeler's positive-class definition), `train_auc`, `oot_auc`,
+   `cv_aucs`, `trained_on_n`, `snapshot_date`. Anyone reproducing the run
+   must match this metadata to be sure they are using the same model.
+3. **Threshold is NOT stored in the joblib.** Instead, the backtest script
+   declares a *quantile* (e.g. "67th percentile of train-period predicted
+   probabilities") and re-derives the resulting cutoff at run-time from
+   training data. This makes threshold drift impossible — given identical
+   training inputs, the cutoff is deterministic.
+4. **Feature implementation** lives under `services/python/src/ml/<area>/features.py`
+   and MUST satisfy a "no-lookahead" unit test that permutes future bars
+   and asserts feature output is unchanged.
+5. **Label implementation** lives under `services/python/src/ml/<area>/labels.py`
+   and is allowed to use future bars (it produces the training target).
+   Features and labels MUST live in separate modules so a reviewer can
+   verify the no-lookahead boundary at file granularity.
+6. The protocol-compliant backtest writes the chosen threshold value into
+   `results/<run_id>/metrics.json` so the actual cutoff used at runtime is
+   visible in the audit trail.
+
+Example: `services/python/scripts/backtest_strat_b_with_predictor.py` +
+`docs/continuation-predictor-v1.md`.
+
 ## Related files
 
 - Template: `services/python/scripts/backtest_template.py`
