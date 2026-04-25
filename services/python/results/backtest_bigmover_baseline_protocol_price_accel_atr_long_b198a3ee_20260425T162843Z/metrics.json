@@ -1,0 +1,26 @@
+{
+  "avg_pnl_pct": -0.0026802187400415023,
+  "by_direction": {
+    "long": {
+      "avg_pnl_pct": -0.0026802187400415023,
+      "median_hold_bars": 142.0,
+      "pf": 0.9255871346821409,
+      "total_pnl_pct": -131.24763148109233,
+      "trades": 48969,
+      "wr": 0.282913680083318
+    },
+    "short": {
+      "avg_pnl_pct": 0.0,
+      "median_hold_bars": 0.0,
+      "pf": 0.0,
+      "total_pnl_pct": 0.0,
+      "trades": 0,
+      "wr": 0.0
+    }
+  },
+  "median_hold_bars": 142.0,
+  "pf": 0.9255871346821409,
+  "total_pnl_pct": -131.24763148109233,
+  "trades": 48969,
+  "wr": 0.282913680083318
+}

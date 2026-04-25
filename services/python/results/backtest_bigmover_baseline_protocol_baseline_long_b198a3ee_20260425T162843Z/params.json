@@ -1,0 +1,20 @@
+{
+  "COOLDOWN_BARS": 96,
+  "DIRECTION": "long",
+  "DIRECTIONS": [
+    "short",
+    "long"
+  ],
+  "FRICTION_PCT": 0.0015,
+  "RANDOM_SEED": 42,
+  "SIGNAL": "baseline",
+  "SIGNALS": [
+    "baseline",
+    "price_accel_atr",
+    "multi_bar_confirm"
+  ],
+  "SNAPSHOT_DATE": "2026-04-01",
+  "STOP_LOSS_PCT": 0.05,
+  "TAKE_PROFIT_PCT": 0.15,
+  "TIMEOUT_BARS": 672
+}
