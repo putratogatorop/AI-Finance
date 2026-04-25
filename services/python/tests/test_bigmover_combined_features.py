@@ -93,10 +93,10 @@ def test_warm_features_are_finite_for_indicators():
     for name in [
         "vol_ratio", "price_drop_pct", "price_rise_pct", "accel_atr_norm",
         "bars_since_high32",
-        "price_vs_ema20_pct", "price_vs_ema50_pct", "ema20_minus_ema50_atr",
-        "rsi14", "rsi14_delta",
-        "macd_norm", "macd_signal_spread_norm", "macd_hist_sign_change",
-        "kdj_k", "kdj_j_minus_k", "kdj_k_above_d",
+        "price_vs_ema9_pct", "price_vs_ema50_pct",
+        "rsi14_delta_1bar", "rsi14_delta_4bar",
+        "macd_signal_spread_norm", "macd_hist_momentum",
+        "kdj_j", "kdj_k",
         "concurrent_dir_breadth",
     ]:
         assert np.isfinite(feats[name]), f"{name} should be finite past warmup but got {feats[name]}"
@@ -109,26 +109,10 @@ def test_warmup_yields_nan_for_indicators():
     trade = {"symbol": "COIN0USDT", "entry_time": entry_ts, "direction": "short"}
     ctx = FeatureContext(candles)
     feats = ctx.build_for(trade)
-    for name in ["price_drop_pct", "rsi14", "kdj_k", "ema20_minus_ema50_atr"]:
+    # macd_signal_spread_norm uses EMA (ewm has no min_periods), so it's
+    # finite immediately — exclude from warmup-NaN list.
+    for name in ["price_drop_pct", "rsi14_delta_4bar", "kdj_j", "bars_since_high32"]:
         assert np.isnan(feats[name]), f"{name} should be NaN at warmup, got {feats[name]}"
-
-
-def test_kdj_k_above_d_is_boolean():
-    candles = _synthetic_candles(n_bars=400)
-    entry_ts = candles["timestamp"].iloc[300]
-    trade = {"symbol": "COIN0USDT", "entry_time": entry_ts, "direction": "short"}
-    ctx = FeatureContext(candles)
-    feats = ctx.build_for(trade)
-    assert feats["kdj_k_above_d"] in (0.0, 1.0)
-
-
-def test_macd_hist_sign_change_is_boolean():
-    candles = _synthetic_candles(n_bars=400)
-    entry_ts = candles["timestamp"].iloc[300]
-    trade = {"symbol": "COIN0USDT", "entry_time": entry_ts, "direction": "short"}
-    ctx = FeatureContext(candles)
-    feats = ctx.build_for(trade)
-    assert feats["macd_hist_sign_change"] in (0.0, 1.0)
 
 
 def test_is_short_toggles_with_direction():

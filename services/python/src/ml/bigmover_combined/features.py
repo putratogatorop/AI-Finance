@@ -1,41 +1,46 @@
 """Feature library for the bigmover combined-with-indicators predictor (v1).
 
+This is the SYNTHESIZED feature set after the Phase-3 5-specialist team
+(EMA / RSI / MACD / KDJ / BTC-trend) ranked candidate features by marginal
+AUC and walk-forward stability. See services/python/src/ml/bigmover_combined/
+SYNTHESIS.md for the per-specialist findings and the rejection rationale
+for dropped features.
+
 CONTRACT — strict no-lookahead:
   Every feature for trade `t` reads ONLY bars whose timestamp `<=` `entry_time(t)`.
-  The bar at exact entry_time IS available (the signal fires at its close).
   Verified by tests/test_bigmover_combined_features.py via future-permutation
   invariance.
 
-The 19 features (see plan):
+The 16 predictive features (+ is_short metadata):
 
 Bigmover detector internals (5)
   - vol_ratio                 volume / 20-bar volume MA at entry bar
   - price_drop_pct            (rolling96_high - close) / rolling96_high
   - price_rise_pct            (close - rolling96_low) / rolling96_low
-  - accel_atr_norm            (close - close[i-1]) / ATR14 (signed)
+  - accel_atr_norm            (close[i] - close[i-1]) / ATR14
   - bars_since_high32         bars since the 32-bar high
 
-EMA (3)
-  - price_vs_ema20_pct        (close - EMA20) / close
+EMA (2; from EMA specialist's top picks)
+  - price_vs_ema9_pct         (close - EMA9) / close
   - price_vs_ema50_pct        (close - EMA50) / close
-  - ema20_minus_ema50_atr     (EMA20 - EMA50) / ATR14
 
-RSI (2)
-  - rsi14                     14-bar Wilder/SMA RSI
-  - rsi14_delta               RSI change over last 1 bar
+RSI (2; from RSI specialist's top picks — both *delta* versions, level dropped)
+  - rsi14_delta_1bar          RSI14[i] - RSI14[i-1]      (15m momentum)
+  - rsi14_delta_4bar          RSI14[i] - RSI14[i-4]      (1h momentum)
 
-MACD (3)
-  - macd_norm                 macd / close
-  - macd_signal_spread_norm   (macd - signal) / close
-  - macd_hist_sign_change     1 if histogram crossed zero in last 4 bars else 0
+MACD (2; from MACD specialist's top picks)
+  - macd_signal_spread_norm   (macd - signal) / close   (= macd_hist / close)
+  - macd_hist_momentum        macd_histogram[i] - macd_histogram[i-2] (jerk)
 
-KDJ (3)
+KDJ (2; from KDJ specialist's top picks — raw levels beat derived spreads)
+  - kdj_j                     J line value
   - kdj_k                     K line value
-  - kdj_j_minus_k             J - K spread
-  - kdj_k_above_d             1 if K > D else 0 (golden/death proxy)
 
-BTC trend (2)
-  - btc_trend_score           continuous score in [-1, 1], sign = direction of BTC
+BTC (2)
+  - btc_trend_score           Candidate B: clip((macd-signal)_4h_lag1 / close_4h_lag1,
+                              ±k=0.005255) / k. Range [-1, +1]. Sign-aware:
+                              positive = bull, negative = bear, magnitude = strength.
+                              Walk-forward winner over daily-SMA50 placeholder.
   - btc_realized_vol_24h      stdev of BTC 1h returns over last 24h
 
 Cross-sectional (1)
@@ -60,22 +65,27 @@ from src.ml.indicators import kdj as _kdj
 from src.ml.indicators import macd as _macd
 from src.ml.indicators import rsi as _rsi
 
-# --- knobs (mirror feature_meta.json) ---------------------------------------
+# --- knobs (also serialized into feature_meta.json) -------------------------
 
 VOL_MA_PERIOD = 20
 PRICE_LOOKBACK_96 = 96
 PRICE_LOOKBACK_32 = 32
 ATR_LOOKBACK = 14
-EMA_FAST = 20
+EMA_FAST = 9
 EMA_SLOW = 50
 RSI_PERIOD = 14
 MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
-KDJ_N, KDJ_K, KDJ_D = 9, 3, 3
+KDJ_N, KDJ_K_SMOOTH, KDJ_D_SMOOTH = 9, 3, 3
 BREADTH_4H_LOOKBACK = 16
-BTC_TREND_SMA = 50
-BTC_TREND_CAP = 0.10  # |close - sma50| / sma50 above 10% saturates the score
 BTC_VOL_LOOKBACK_24H_HOURS = 24
-BTC_MACD_LOOKBACK = 4
+# Candidate B BTC trend score parameters (locked by Phase-3 specialist).
+# k is the 90th percentile of |MACD-signal spread / close| on the 4h BTC
+# timeline of the 2026-04-01 snapshot.
+BTC_TREND_K = 0.005255
+BTC_TREND_TIMEFRAME = "4h"
+BTC_TREND_MACD_FAST = 12
+BTC_TREND_MACD_SLOW = 26
+BTC_TREND_MACD_SIGNAL = 9
 
 FEATURE_NAMES = [
     # bigmover internals
@@ -84,21 +94,18 @@ FEATURE_NAMES = [
     "price_rise_pct",
     "accel_atr_norm",
     "bars_since_high32",
-    # EMA
-    "price_vs_ema20_pct",
+    # EMA (synthesized: 9 + 50)
+    "price_vs_ema9_pct",
     "price_vs_ema50_pct",
-    "ema20_minus_ema50_atr",
-    # RSI
-    "rsi14",
-    "rsi14_delta",
-    # MACD
-    "macd_norm",
+    # RSI (synthesized: deltas only)
+    "rsi14_delta_1bar",
+    "rsi14_delta_4bar",
+    # MACD (synthesized: spread + jerk)
     "macd_signal_spread_norm",
-    "macd_hist_sign_change",
-    # KDJ
+    "macd_hist_momentum",
+    # KDJ (synthesized: raw J + K)
+    "kdj_j",
     "kdj_k",
-    "kdj_j_minus_k",
-    "kdj_k_above_d",
     # BTC
     "btc_trend_score",
     "btc_realized_vol_24h",
@@ -118,19 +125,17 @@ class _AssetView:
     low: np.ndarray
     close: np.ndarray
     volume: np.ndarray
-    # rolling features
     vol_ma20: np.ndarray
     rolling_high96: np.ndarray
     rolling_low96: np.ndarray
     bars_since_high32: np.ndarray
     atr14: np.ndarray
-    ema20: np.ndarray
+    ema9: np.ndarray
     ema50: np.ndarray
     rsi14: np.ndarray
     macd: np.ndarray
     macd_sig: np.ndarray
     macd_hist: np.ndarray
-    macd_hist_sign_change: np.ndarray
     kdj_k: np.ndarray
     kdj_d: np.ndarray
     kdj_j: np.ndarray
@@ -139,7 +144,6 @@ class _AssetView:
 def _argmax_in_window_to_offset(arr: np.ndarray, window: int) -> np.ndarray:
     """For each i, position (within last `window` bars including i) of the max value.
     Returns offset = (window-1) - argmax_local, so 0 means current bar is the max.
-    NaN before warmup.
     """
     n = len(arr)
     out = np.full(n, np.nan)
@@ -151,7 +155,6 @@ def _argmax_in_window_to_offset(arr: np.ndarray, window: int) -> np.ndarray:
 
 def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetView:
     sub = sub.sort_values(ts_col).reset_index(drop=True)
-    # Strip tz info → tz-naive datetime64[ns] for fast np.searchsorted lookup.
     ts = (
         pd.to_datetime(sub[ts_col], utc=True)
         .dt.tz_convert(None)
@@ -171,38 +174,26 @@ def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetVie
     )
     bars_since_high32 = _argmax_in_window_to_offset(h, PRICE_LOOKBACK_32)
     atr14 = _atr(pd.Series(h), pd.Series(l), pd.Series(c), ATR_LOOKBACK).to_numpy()
-    ema20 = _ema(pd.Series(c), EMA_FAST).to_numpy()
+    ema9 = _ema(pd.Series(c), EMA_FAST).to_numpy()
     ema50 = _ema(pd.Series(c), EMA_SLOW).to_numpy()
     rsi14 = _rsi(pd.Series(c), RSI_PERIOD).to_numpy()
     md = _macd(pd.Series(c), MACD_FAST, MACD_SLOW, MACD_SIGNAL)
     macd_arr = md["macd"].to_numpy()
     macd_sig_arr = md["signal"].to_numpy()
     macd_hist_arr = md["histogram"].to_numpy()
-    # macd histogram sign change in last `BTC_MACD_LOOKBACK` bars (incl. current).
-    sign = np.sign(macd_hist_arr)
-    sign_change = np.zeros(len(sign), dtype=float)
-    for i in range(BTC_MACD_LOOKBACK, len(sign)):
-        window_signs = sign[i - BTC_MACD_LOOKBACK + 1 : i + 1]
-        # 1 if both +1 and -1 present in window (i.e., crossed zero)
-        if np.any(window_signs > 0) and np.any(window_signs < 0):
-            sign_change[i] = 1.0
-    sign_change[:BTC_MACD_LOOKBACK] = np.nan
-
-    k = _kdj(pd.Series(h), pd.Series(l), pd.Series(c), n=KDJ_N, k_smooth=KDJ_K, d_smooth=KDJ_D)
-    kdj_k = k["k"].to_numpy()
-    kdj_d = k["d"].to_numpy()
-    kdj_j = k["j"].to_numpy()
-
+    k = _kdj(
+        pd.Series(h), pd.Series(l), pd.Series(c),
+        n=KDJ_N, k_smooth=KDJ_K_SMOOTH, d_smooth=KDJ_D_SMOOTH,
+    )
     return _AssetView(
         ts=ts, open=o, high=h, low=l, close=c, volume=v,
         vol_ma20=vol_ma20,
         rolling_high96=rolling_high96, rolling_low96=rolling_low96,
         bars_since_high32=bars_since_high32, atr14=atr14,
-        ema20=ema20, ema50=ema50,
+        ema9=ema9, ema50=ema50,
         rsi14=rsi14,
         macd=macd_arr, macd_sig=macd_sig_arr, macd_hist=macd_hist_arr,
-        macd_hist_sign_change=sign_change,
-        kdj_k=kdj_k, kdj_d=kdj_d, kdj_j=kdj_j,
+        kdj_k=k["k"].to_numpy(), kdj_d=k["d"].to_numpy(), kdj_j=k["j"].to_numpy(),
     )
 
 
@@ -213,8 +204,9 @@ def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetVie
 class FeatureContext:
     """All snapshot-wide panels needed to build features for any trade.
 
-    Construction is the heavy step (per-asset rolling indicators, BTC trend
-    panel, cross-sectional breadth panel). Per-trade lookup is then O(1).
+    Heavy step at construction: per-asset rolling indicators (cached lazily),
+    BTC 4h MACD trend score (Candidate B), cross-sectional 4h-return panel.
+    Per-trade lookup is then O(1).
     """
     candles: pd.DataFrame
     btc_asset_key: str = "BTCUSDT"
@@ -227,7 +219,7 @@ class FeatureContext:
     _per_asset: dict[str, _AssetView] = field(init=False, default_factory=dict)
 
     def __post_init__(self):
-        # BTC view
+        # BTC view (per-asset rolling).
         btc_sub = self.candles[self.candles["asset"] == self.btc_asset_key]
         if len(btc_sub) == 0:
             raise ValueError(
@@ -236,25 +228,26 @@ class FeatureContext:
             )
         self._btc_view = _build_asset_view(btc_sub)
 
-        # BTC trend score: continuous, signed, in [-1, 1].
-        # Score = clip((close - SMA50_daily) / SMA50_daily, -BTC_TREND_CAP, +BTC_TREND_CAP)
-        #         / BTC_TREND_CAP. So +1 = BTC at +10% above SMA50 daily (strong bull);
-        # -1 = BTC at -10% below SMA50 daily (strong bear); 0 = at SMA50.
+        # BTC trend score (Candidate B):
+        # Resample BTC 15m close to 4h, compute MACD(12,26,9), take
+        # (macd-signal) / close, shift by 1 4h-bar (no lookahead at boundary),
+        # clip to ±BTC_TREND_K, divide by k → range [-1, +1]. Forward-fill to
+        # 15m grid.
         btc_15m_close = (
             btc_sub.sort_values("timestamp").set_index("timestamp")["close"].astype(float)
         )
-        btc_daily = btc_15m_close.resample("1D", label="right", closed="right").last()
-        btc_sma50 = btc_daily.rolling(window=BTC_TREND_SMA, min_periods=BTC_TREND_SMA).mean()
-        # No-lookahead: at any 15m timestamp, use the most recent CLOSED daily bar's
-        # SMA50 (= shift by 1 daily bar).
-        score_daily = ((btc_daily - btc_sma50) / btc_sma50).shift(1)
-        score_daily = score_daily.clip(-BTC_TREND_CAP, BTC_TREND_CAP) / BTC_TREND_CAP
-        self._btc_trend_score_15m = score_daily.reindex(btc_15m_close.index, method="ffill")
+        btc_4h = btc_15m_close.resample(BTC_TREND_TIMEFRAME, label="right", closed="right").last()
+        m4h = _macd(btc_4h, BTC_TREND_MACD_FAST, BTC_TREND_MACD_SLOW, BTC_TREND_MACD_SIGNAL)
+        spread_4h = (m4h["macd"] - m4h["signal"]).shift(1) / btc_4h.shift(1)
+        score_4h = spread_4h.clip(-BTC_TREND_K, BTC_TREND_K) / BTC_TREND_K
+        self._btc_trend_score_15m = score_4h.reindex(btc_15m_close.index, method="ffill")
 
-        # BTC realized 24h vol
+        # BTC realized 24h vol from 1h returns.
         btc_1h_close = btc_15m_close.resample("1h", label="right", closed="right").last()
         btc_1h_ret = btc_1h_close.pct_change()
-        rv = btc_1h_ret.rolling(window=BTC_VOL_LOOKBACK_24H_HOURS, min_periods=BTC_VOL_LOOKBACK_24H_HOURS).std(ddof=0)
+        rv = btc_1h_ret.rolling(
+            window=BTC_VOL_LOOKBACK_24H_HOURS, min_periods=BTC_VOL_LOOKBACK_24H_HOURS
+        ).std(ddof=0)
         self._btc_realized_vol_24h_15m = rv.reindex(btc_15m_close.index, method="ffill")
 
         # Cross-sectional 4h-return panel (timestamp x asset).
@@ -319,47 +312,33 @@ class FeatureContext:
         if i < 0:
             return out
 
-        c, h, l, o, vol = view.close, view.high, view.low, view.open, view.volume
+        c, h, l, _o, vol = view.close, view.high, view.low, view.open, view.volume
 
-        # vol_ratio
+        # --- bigmover internals ----------------------------------------------
         if i < len(view.vol_ma20) and view.vol_ma20[i] > 0:
             out["vol_ratio"] = float(vol[i] / view.vol_ma20[i])
-
-        # price_drop_pct, price_rise_pct
         if i < len(view.rolling_high96) and np.isfinite(view.rolling_high96[i]) and view.rolling_high96[i] > 0:
             out["price_drop_pct"] = float((view.rolling_high96[i] - c[i]) / view.rolling_high96[i])
         if i < len(view.rolling_low96) and np.isfinite(view.rolling_low96[i]) and view.rolling_low96[i] > 0:
             out["price_rise_pct"] = float((c[i] - view.rolling_low96[i]) / view.rolling_low96[i])
-
-        # accel_atr_norm
         if i >= 1 and i < len(view.atr14) and np.isfinite(view.atr14[i]) and view.atr14[i] > 0:
             out["accel_atr_norm"] = float((c[i] - c[i - 1]) / view.atr14[i])
-
-        # bars_since_high32
         if i < len(view.bars_since_high32) and np.isfinite(view.bars_since_high32[i]):
             out["bars_since_high32"] = float(view.bars_since_high32[i])
 
-        # EMA features
-        if i < len(view.ema20) and np.isfinite(view.ema20[i]) and c[i] > 0:
-            out["price_vs_ema20_pct"] = float((c[i] - view.ema20[i]) / c[i])
+        # --- EMA (9, 50) -----------------------------------------------------
+        if i < len(view.ema9) and np.isfinite(view.ema9[i]) and c[i] > 0:
+            out["price_vs_ema9_pct"] = float((c[i] - view.ema9[i]) / c[i])
         if i < len(view.ema50) and np.isfinite(view.ema50[i]) and c[i] > 0:
             out["price_vs_ema50_pct"] = float((c[i] - view.ema50[i]) / c[i])
-        if (
-            i < len(view.ema20) and i < len(view.ema50) and i < len(view.atr14)
-            and np.isfinite(view.ema20[i]) and np.isfinite(view.ema50[i])
-            and np.isfinite(view.atr14[i]) and view.atr14[i] > 0
-        ):
-            out["ema20_minus_ema50_atr"] = float((view.ema20[i] - view.ema50[i]) / view.atr14[i])
 
-        # RSI features
-        if i < len(view.rsi14) and np.isfinite(view.rsi14[i]):
-            out["rsi14"] = float(view.rsi14[i])
-            if i >= 1 and np.isfinite(view.rsi14[i - 1]):
-                out["rsi14_delta"] = float(view.rsi14[i] - view.rsi14[i - 1])
+        # --- RSI deltas (1-bar = 15m, 4-bar = 1h) ----------------------------
+        if i >= 1 and i < len(view.rsi14) and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 1]):
+            out["rsi14_delta_1bar"] = float(view.rsi14[i] - view.rsi14[i - 1])
+        if i >= 4 and i < len(view.rsi14) and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 4]):
+            out["rsi14_delta_4bar"] = float(view.rsi14[i] - view.rsi14[i - 4])
 
-        # MACD features
-        if i < len(view.macd) and np.isfinite(view.macd[i]) and c[i] > 0:
-            out["macd_norm"] = float(view.macd[i] / c[i])
+        # --- MACD (signal-spread normalised + 2-bar histogram momentum) ------
         if (
             i < len(view.macd) and i < len(view.macd_sig)
             and np.isfinite(view.macd[i]) and np.isfinite(view.macd_sig[i]) and c[i] > 0
@@ -367,30 +346,28 @@ class FeatureContext:
             out["macd_signal_spread_norm"] = float(
                 (view.macd[i] - view.macd_sig[i]) / c[i]
             )
-        if i < len(view.macd_hist_sign_change) and np.isfinite(view.macd_hist_sign_change[i]):
-            out["macd_hist_sign_change"] = float(view.macd_hist_sign_change[i])
+        if i >= 2 and i < len(view.macd_hist) and np.isfinite(view.macd_hist[i]) and np.isfinite(view.macd_hist[i - 2]):
+            out["macd_hist_momentum"] = float(view.macd_hist[i] - view.macd_hist[i - 2])
 
-        # KDJ features
+        # --- KDJ raw levels --------------------------------------------------
+        if i < len(view.kdj_j) and np.isfinite(view.kdj_j[i]):
+            out["kdj_j"] = float(view.kdj_j[i])
         if i < len(view.kdj_k) and np.isfinite(view.kdj_k[i]):
             out["kdj_k"] = float(view.kdj_k[i])
-            if np.isfinite(view.kdj_j[i]):
-                out["kdj_j_minus_k"] = float(view.kdj_j[i] - view.kdj_k[i])
-            if np.isfinite(view.kdj_d[i]):
-                out["kdj_k_above_d"] = float(view.kdj_k[i] > view.kdj_d[i])
 
-        # BTC trend score (asof at entry_ts so we get the most recent value <= ts)
+        # --- BTC trend score (Candidate B) -----------------------------------
         if self._btc_trend_score_15m is not None:
             v = self._btc_trend_score_15m.asof(entry_ts)
             if pd.notna(v):
                 out["btc_trend_score"] = float(v)
 
-        # BTC realized 24h vol
+        # --- BTC realized 24h vol --------------------------------------------
         if self._btc_realized_vol_24h_15m is not None:
             v = self._btc_realized_vol_24h_15m.asof(entry_ts)
             if pd.notna(v):
                 out["btc_realized_vol_24h"] = float(v)
 
-        # concurrent_dir_breadth: fraction of universe whose 4h ret matches trade direction
+        # --- concurrent_dir_breadth ------------------------------------------
         if self._ret_4h_panel is not None:
             try:
                 row = self._ret_4h_panel.loc[entry_ts]
