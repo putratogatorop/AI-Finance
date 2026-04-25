@@ -188,51 +188,13 @@ def list_db_assets() -> list[str]:
 
 
 def compute_regime(candle_cache: dict[str, pd.DataFrame], btc_df: pd.DataFrame) -> bool:
-    """Check if regime allows shorting.
+    """Return True iff a SHORT signal is allowed.
 
-    Returns True if BTC daily close < 20-day EMA AND < 60% of coins above
-    their 20-day EMA.
+    Delegates to src.ml.regime — single source of truth shared with the long
+    scanner and the regime backtests. Behavior preserved by tests/test_regime.py.
     """
-    # BTC check: resample to daily, compute 20-day EMA
-    if len(btc_df) < 20 * 96:  # need ~20 days of 15m data
-        return False
-
-    btc_daily = (
-        btc_df.set_index("timestamp")
-        .resample("1D")
-        .agg({"close": "last"})
-        .dropna()
-    )
-    if len(btc_daily) < 20:
-        return False
-
-    btc_ema20 = btc_daily["close"].ewm(span=20, adjust=False).mean()
-    btc_bearish = float(btc_daily["close"].iloc[-1]) < float(btc_ema20.iloc[-1])
-
-    if not btc_bearish:
-        return False
-
-    # Breadth check: % of coins above their 20-day EMA
-    above_count = 0
-    total_count = 0
-    for pair, df in candle_cache.items():
-        if pair == "BTC_USDT" or len(df) < 20 * 96:
-            continue
-        coin_daily = (
-            df.set_index("timestamp")
-            .resample("1D")
-            .agg({"close": "last"})
-            .dropna()
-        )
-        if len(coin_daily) < 20:
-            continue
-        ema20 = coin_daily["close"].ewm(span=20, adjust=False).mean()
-        total_count += 1
-        if float(coin_daily["close"].iloc[-1]) > float(ema20.iloc[-1]):
-            above_count += 1
-
-    breadth = above_count / total_count if total_count > 0 else 0.5
-    return breadth < 0.60
+    from src.ml.regime import compute_short_regime
+    return compute_short_regime(candle_cache, btc_df)
 
 
 # ── Dump detection ──────────────────────────────────────────────────

@@ -61,54 +61,25 @@ engine = create_engine(DB_URL)
 # ── Regime computation ───────────────────────────────────────────────
 
 def compute_daily_regime(all_coin_data: dict, btc_df: pd.DataFrame) -> dict:
-    """Precompute daily regime signals.
+    """Precompute daily regime signals (short side).
 
-    Returns dict: {date -> {"btc_bearish": bool, "breadth": float,
-                             "breadth_low": bool, "allowed": bool}}
+    Delegates to src.ml.regime — single source of truth shared with live
+    scanners. Returns the same shape as before:
+      {date -> {"btc_bearish": bool, "breadth": float,
+                "breadth_low": bool, "allowed": bool}}
     """
-    # BTC daily close and 20-day EMA
-    btc_daily = btc_df.set_index("open_time").resample("1D").agg(
-        {"open": "first", "high": "max", "low": "min", "close": "last"}
-    ).dropna()
-    btc_daily["ema20"] = btc_daily["close"].ewm(span=20, adjust=False).mean()
-    btc_daily["bearish"] = btc_daily["close"] < btc_daily["ema20"]
+    from src.ml.regime import regime_history
 
-    # Altcoin breadth: for each day, what % of coins have close > 20-day EMA
-    coin_above_ema: dict = {}  # date -> [count_above, count_total]
-
-    for symbol, df in all_coin_data.items():
-        if symbol == "BTCUSDT":
-            continue
-        coin_daily = df.set_index("open_time").resample("1D").agg({"close": "last"}).dropna()
-        coin_daily["ema20"] = coin_daily["close"].ewm(span=20, adjust=False).mean()
-        coin_daily["above"] = coin_daily["close"] > coin_daily["ema20"]
-
-        for date, row in coin_daily.iterrows():
-            d = date.date()
-            if d not in coin_above_ema:
-                coin_above_ema[d] = [0, 0]
-            coin_above_ema[d][1] += 1
-            if row["above"]:
-                coin_above_ema[d][0] += 1
-
-    # Build regime dict
-    regime = {}
-    for date in sorted(coin_above_ema.keys()):
-        above, total = coin_above_ema[date]
-        breadth = above / total if total > 0 else 0.5
-
-        btc_row = btc_daily[btc_daily.index.date == date]
-        btc_bear = bool(btc_row["bearish"].iloc[0]) if len(btc_row) > 0 else False
-
-        allowed = btc_bear and breadth < 0.60
-        regime[date] = {
-            "btc_bearish": btc_bear,
-            "breadth": breadth,
-            "breadth_low": breadth < 0.60,
-            "allowed": allowed,
+    full = regime_history(all_coin_data, btc_df, ts_col="open_time", btc_key="BTCUSDT")
+    return {
+        d: {
+            "btc_bearish": v["btc_bearish"],
+            "breadth": v["breadth"],
+            "breadth_low": v["breadth_low"],
+            "allowed": v["allowed"],
         }
-
-    return regime
+        for d, v in full.items()
+    }
 
 
 # ── Trade simulation ─────────────────────────────────────────────────
