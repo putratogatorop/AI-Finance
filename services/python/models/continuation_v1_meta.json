@@ -1,0 +1,55 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "asset_4h_ret",
+    "asset_24h_ret",
+    "prior_bar_wick_ratio",
+    "atr_norm_drop",
+    "bars_since_high",
+    "btc_4h_ret",
+    "btc_above_ema50_4h",
+    "btc_realized_vol_24h",
+    "vol_decile",
+    "concurrent_down_breadth",
+    "body_to_range_ratio",
+    "vol_zscore_8"
+  ],
+  "label_thresholds": {
+    "fwd_target": 0.18,
+    "drawup_cap": 0.04,
+    "max_bars": 192
+  },
+  "train_auc": 0.5980323770916275,
+  "oot_auc": 0.5520522195368821,
+  "cv_aucs": [
+    0.5910341981066962,
+    0.5502910635761677,
+    0.5744519339290581,
+    0.37386840310714986
+  ],
+  "trained_on_n": 64171,
+  "trained_on_pos_rate": 0.052983434884916865,
+  "snapshot_date": "2026-04-01",
+  "rule_summary": {
+    "threshold": 0.5197371035128933,
+    "moments": {
+      "asset_4h_ret": [
+        -0.02505759697647964,
+        0.04077727232382588
+      ],
+      "btc_4h_ret": [
+        -0.010085247348942134,
+        0.013781885310890345
+      ],
+      "atr_norm_drop": [
+        5.884261444194259,
+        2.0887417499794694
+      ]
+    },
+    "train_n": 21390,
+    "train_pf": 1.031595145287118,
+    "oot_n": 1520,
+    "oot_pf": 1.291680174796475,
+    "passes_gate_a": false
+  }
+}
