@@ -1,0 +1,56 @@
+{
+  "q0.6667": {
+    "quantile": 0.6666666666666666,
+    "threshold": 0.5030929376350334,
+    "note": "diagnostic (different quantile)"
+  },
+  "q0.5000": {
+    "quantile": 0.5,
+    "threshold": 0.4784783379085953,
+    "note": "diagnostic (different quantile)"
+  },
+  "thr_0.45": {
+    "threshold": 0.45,
+    "equivalent_train_quantile": 0.2577753455611065,
+    "oot_full_metrics": {
+      "trades": 8328,
+      "wr": 0.295268972142171,
+      "pf": 0.9942542784410563,
+      "avg_pnl_pct": -0.00014710670096592152,
+      "total_pnl_pct": -1.2251046056441943
+    }
+  },
+  "thr_0.50": {
+    "threshold": 0.5,
+    "equivalent_train_quantile": 0.6487686903101665,
+    "oot_full_metrics": {
+      "trades": 4002,
+      "wr": 0.3205897051474263,
+      "pf": 1.1616360249004218,
+      "avg_pnl_pct": 0.004178231447411249,
+      "total_pnl_pct": 16.72128225253982
+    }
+  },
+  "thr_0.55": {
+    "threshold": 0.55,
+    "equivalent_train_quantile": 0.8486380567373383,
+    "oot_full_metrics": {
+      "trades": 1844,
+      "wr": 0.3297180043383948,
+      "pf": 1.10462583231242,
+      "avg_pnl_pct": 0.002784011640084507,
+      "total_pnl_pct": 5.133717464315831
+    }
+  },
+  "thr_0.60": {
+    "threshold": 0.6,
+    "equivalent_train_quantile": 0.9302204882871115,
+    "oot_full_metrics": {
+      "trades": 915,
+      "wr": 0.3453551912568306,
+      "pf": 1.097242255025091,
+      "avg_pnl_pct": 0.0025568537151579285,
+      "total_pnl_pct": 2.3395211493695047
+    }
+  }
+}
