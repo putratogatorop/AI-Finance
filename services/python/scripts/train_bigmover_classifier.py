@@ -5,7 +5,9 @@ Walk-forward validation:
   Train:   2023-04 to 2025-03 (24 months)
   Embargo: 2025-04 (1 month gap)
   Test:    2025-05 to 2025-10 (6 months)
-  Holdout: 2025-11 to 2026-04 (final check, touch ONCE)
+  Holdout: 2025-11 to 2026-01-23 (shortened on 2026-04-23 so that the 87-variant
+           ML grid's threshold-selection window 2026-01-23 to 2026-04-23 can be
+           treated as truly classifier-unseen fresh OOT).
 
 Run from services/python/:
   python scripts/train_bigmover_classifier.py
@@ -213,7 +215,7 @@ def main():
     # ── 3. Time-based splits ──────────────────────────────────────────────
     train_mask = (df["signal_time"] >= "2023-04-01") & (df["signal_time"] < "2025-04-01")
     test_mask = (df["signal_time"] >= "2025-05-01") & (df["signal_time"] < "2025-11-01")
-    holdout_mask = (df["signal_time"] >= "2025-11-01") & (df["signal_time"] < "2026-05-01")
+    holdout_mask = (df["signal_time"] >= "2025-11-01") & (df["signal_time"] < "2026-01-23")
 
     train_df = df[train_mask].copy()
     test_df = df[test_mask].copy()
@@ -310,7 +312,7 @@ def main():
         holdout_probs,
         holdout_df["fwd_max_gain_24h"].values,
         holdout_df["fwd_max_loss_24h"].values,
-        label="Holdout (2025-11 to 2026-04)",
+        label="Holdout (2025-11 to 2026-01-23)",
     )
 
     if len(holdout_results) > 0:

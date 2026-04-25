@@ -1,0 +1,11 @@
+{
+  "avg_notional_usd": 739577.5038962942,
+  "final_equity_usd": 36822664.02981192,
+  "final_notional_usd": 1000000.0,
+  "max_drawdown_pct": -30.5571586617441,
+  "pf": 3.1438741419087957,
+  "total_return_pct": 36822564.02981192,
+  "trades": 4006,
+  "trades_capped": 2889,
+  "wr": 0.6727408886669995
+}

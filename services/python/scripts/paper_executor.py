@@ -41,6 +41,73 @@ GATEIO_BASE = "https://api.gateio.ws/api/v4"
 # Multi-threshold paper accounts — each runs independently
 THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60]
 
+# All 5 v2 threshold accounts disabled 2026-04-24. Four-agent audit found:
+#   1. SEVERE survivorship bias — live scanner fetches ALL Gate.io futures
+#      (including 5x leveraged tokens like FARTCOIN5L) while the backtest
+#      universe was ~100 coins in local CSV storage. Model trades coins it
+#      was never trained on.
+#   2. P-hack on threshold selection — PF 5.05 is best-of-6 thresholds
+#      swept on the same walk-forward OOS used for evaluation. No Bonferroni.
+#   3. Exit logic mismatch — backtest used fixed TP (+5% or +10%); paper
+#      executor runs trailing-stop with tp_price=0. The 5/5 winning streak
+#      is measuring a strategy no backtest ever characterized.
+# See docs/research-journal/v2ml-audit-2026-04-24.md for the full report.
+# Flip V2_ENABLED back to True only after fixing (1) universe filter,
+# (2) proper train/test/holdout split with Bonferroni correction, and
+# (3) backtesting the actual trail-stop exit the live executor uses.
+V2_ENABLED = False
+
+# Strategy key for the existing v2 accounts (failed-bounce short scanner).
+V2_STRATEGY = "v2_failed_bounce"
+
+# Bigmover-specific sizing overrides (derived from 3y sizing-sweep backtest
+# commit 195388b9: 15%/5x/SL7% dominates 10%/5x/SL5% on PF / PF_p5 / Calmar).
+BIGMOVER_POSITION_PCT = 0.15
+BIGMOVER_LEVERAGE = 5
+BIGMOVER_SL_PCT = 0.07
+
+# Notional cap for bigmover compounding — prevents live equity from compounding
+# into astronomical notionals. Gate.io per-position liquidity for top-100 alts
+# tops out around $500k-$5M depending on tier; $100k is safe and realistic for
+# an initial deploy. Raise later if account grows and liquidity allows.
+BIGMOVER_NOTIONAL_CAP_USD = float(
+    os.environ.get("BIGMOVER_NOTIONAL_CAP_USD", "100000")
+)
+
+# Bigmover paper accounts (added 2026-04-23). 7 separate portfolios:
+#   6 single-direction (one per signal_type x direction)
+#   1 COMBINED (multi_bar_confirm long+short sharing a single 5-slot pool)
+# Each reads from scanner_signals_bigmover. Threshold is stored as sentinel 1.0
+# because bigmover has no ML gate.
+#   strategy_key matches scanner_signals_bigmover.signal_type + direction.
+#   direction=None on the combined account means "accept both sides".
+# All 7 accounts disabled 2026-04-23: their justifying backtest had a look-ahead
+# bias (see src/ml/bigmover_signals.py and the SUPERSEDED header in
+# results/_BIGMOVER_RESEARCH_README.md). Leak-fixed PF is 0.84-0.93, below the
+# 1.30 ship floor. Flip "enabled" to True after a clean backtest passes.
+BIGMOVER_ACCOUNTS: list[dict] = [
+    {"strategy": "bigmover_baseline_short",
+     "signal_type": "baseline", "direction": "short", "enabled": False},
+    {"strategy": "bigmover_baseline_long",
+     "signal_type": "baseline", "direction": "long", "enabled": False},
+    {"strategy": "bigmover_price_accel_atr_short",
+     "signal_type": "price_accel_atr", "direction": "short", "enabled": False},
+    {"strategy": "bigmover_price_accel_atr_long",
+     "signal_type": "price_accel_atr", "direction": "long", "enabled": False},
+    {"strategy": "bigmover_multi_bar_confirm_short",
+     "signal_type": "multi_bar_confirm", "direction": "short", "enabled": False},
+    {"strategy": "bigmover_multi_bar_confirm_long",
+     "signal_type": "multi_bar_confirm", "direction": "long", "enabled": False},
+    # Combined long+short, shared 5-slot pool.
+    {"strategy": "bigmover_multi_bar_confirm_combined",
+     "signal_type": "multi_bar_confirm", "direction": None, "enabled": False},
+]
+BIGMOVER_SENTINEL_THRESHOLD = 1.0  # no ML gate; distinguishes rows from v2 ones
+
+
+def _is_bigmover_strategy(strategy: str) -> bool:
+    return strategy.startswith("bigmover_")
+
 # Portfolio sim
 STARTING_EQUITY_USD = 100.0   # paper $100; adjust to match what you'd start live
 POSITION_PCT = 0.10           # 10% of equity per trade (matches backtest)
@@ -118,8 +185,38 @@ def venue_for_direction(direction: str) -> str:
 
 # ── DB schema ────────────────────────────────────────────────────────
 
+def ensure_bigmover_signal_table(engine):
+    """Create scanner_signals_bigmover table (mirror of live_scanner_bigmover.py)
+    so the executor's join doesn't fail if the scanner hasn't run yet.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scanner_signals_bigmover (
+                id SERIAL PRIMARY KEY,
+                symbol VARCHAR(20) NOT NULL,
+                signal_type VARCHAR(20) NOT NULL,
+                direction VARCHAR(5) NOT NULL,
+                vol_ratio DOUBLE PRECISION,
+                price_move DOUBLE PRECISION,
+                accel_value DOUBLE PRECISION,
+                atr_value DOUBLE PRECISION,
+                confirm_delta DOUBLE PRECISION,
+                regime VARCHAR(10),
+                regime_allowed BOOLEAN,
+                signal_time TIMESTAMPTZ NOT NULL,
+                status VARCHAR(10) DEFAULT 'active',
+                entry_price DOUBLE PRECISION,
+                pnl_pct DOUBLE PRECISION,
+                exit_reason VARCHAR(20),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (symbol, signal_type, direction, signal_time)
+            )
+        """))
+
+
 def ensure_signal_tables(engine):
     """Create signal tables if the scanners haven't run yet, so JOINs don't fail."""
+    ensure_bigmover_signal_table(engine)
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS scanner_signals_v2 (
@@ -207,9 +304,19 @@ def ensure_paper_table(engine):
         conn.execute(text(
             "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
         ))
+        # Bigmover: add strategy discriminator. Default existing rows to legacy v2.
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS strategy "
+            f"VARCHAR(40) NOT NULL DEFAULT '{V2_STRATEGY}'"
+        ))
+        # Replace the (source_table, source_id, threshold) uniqueness so bigmover
+        # rows (sharing threshold=1.0) can coexist when routed to different strategies.
+        conn.execute(text(
+            "DROP INDEX IF EXISTS uq_paper_src_threshold"
+        ))
         conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_src_threshold
-            ON paper_trades (source_table, source_id, threshold)
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_src_threshold_strategy
+            ON paper_trades (source_table, source_id, threshold, strategy)
         """))
 
 
@@ -225,6 +332,8 @@ class Signal:
     entry_price: float
     signal_time: datetime
     regime_allowed: bool | None  # None for pre-migration rows
+    # Bigmover-only: None for v2 signals, else one of the SIGNALS constants
+    signal_type: str | None = None
 
 
 def fetch_recent_signals(engine) -> list[Signal]:
@@ -268,53 +377,87 @@ def fetch_recent_signals(engine) -> list[Signal]:
                 regime_allowed=r[6],
             ))
 
+        # Bigmover signals (all 3 signal types x 2 directions, no ML gate)
+        bigmover_rows = conn.execute(text("""
+            SELECT id, symbol, signal_type, direction, signal_time,
+                   entry_price, regime_allowed
+            FROM scanner_signals_bigmover
+            WHERE status = 'active'
+              AND signal_time >= NOW() - INTERVAL '48 hours'
+            ORDER BY signal_time
+        """)).fetchall()
+        for r in bigmover_rows:
+            signals.append(Signal(
+                source_table="scanner_signals_bigmover",
+                source_id=r[0], symbol=r[1], direction=r[3],
+                ml_prob=1.0,  # sentinel — no ML gate for bigmover
+                signal_time=r[4], entry_price=float(r[5]),
+                regime_allowed=r[6],
+                signal_type=r[2],
+            ))
+
     return signals
 
 
-def current_equity(engine, threshold: float) -> float:
+def current_equity(engine, threshold: float, strategy: str = V2_STRATEGY) -> float:
     with engine.begin() as conn:
         row = conn.execute(text("""
             SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
-            WHERE threshold = :th AND status IN ('won', 'lost', 'timeout')
-        """), {"th": threshold}).fetchone()
+            WHERE threshold = :th AND strategy = :strat
+              AND status IN ('won', 'lost', 'timeout')
+        """), {"th": threshold, "strat": strategy}).fetchone()
     return STARTING_EQUITY_USD + (float(row[0]) if row else 0.0)
 
 
-def open_positions(engine, threshold: float) -> int:
+def open_positions(engine, threshold: float, strategy: str = V2_STRATEGY) -> int:
     with engine.begin() as conn:
-        row = conn.execute(text(
-            "SELECT COUNT(*) FROM paper_trades WHERE threshold = :th AND status = 'open'"
-        ), {"th": threshold}).fetchone()
+        row = conn.execute(text("""
+            SELECT COUNT(*) FROM paper_trades
+            WHERE threshold = :th AND strategy = :strat AND status = 'open'
+        """), {"th": threshold, "strat": strategy}).fetchone()
     return int(row[0]) if row else 0
 
 
-def today_pnl_pct(engine, threshold: float) -> float:
+def today_pnl_pct(engine, threshold: float, strategy: str = V2_STRATEGY) -> float:
     with engine.begin() as conn:
         row = conn.execute(text("""
             SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
-            WHERE threshold = :th AND exit_time >= CURRENT_DATE
+            WHERE threshold = :th AND strategy = :strat
+              AND exit_time >= CURRENT_DATE
               AND status IN ('won', 'lost', 'timeout')
-        """), {"th": threshold}).fetchone()
+        """), {"th": threshold, "strat": strategy}).fetchone()
     return (float(row[0]) if row else 0.0) / STARTING_EQUITY_USD
 
 
-def open_paper_trade(engine, sig: Signal, threshold: float):
-    # Short-only mode — skip longs until long-side edge is proven
-    if sig.direction == "long":
+def open_paper_trade(
+    engine, sig: Signal, threshold: float, strategy: str = V2_STRATEGY
+):
+    # Short-only mode for v2 accounts — skip longs there until long edge proven.
+    # Bigmover accounts explicitly enable longs (direction is part of the strategy key).
+    if strategy == V2_STRATEGY and sig.direction == "long":
         return
 
-    equity = current_equity(engine, threshold)
-    position_usd = equity * POSITION_PCT * LEVERAGE
+    equity = current_equity(engine, threshold, strategy)
+
+    if _is_bigmover_strategy(strategy):
+        # Bigmover: use 15%/5x sizing (sweep winner), apply notional cap, use SL=7%.
+        desired_notional = equity * BIGMOVER_POSITION_PCT * BIGMOVER_LEVERAGE
+        position_usd = min(desired_notional, BIGMOVER_NOTIONAL_CAP_USD)
+        sl_pct_used = BIGMOVER_SL_PCT
+    else:
+        # Legacy v2 sizing.
+        position_usd = equity * POSITION_PCT * LEVERAGE
+        sl_pct_used = SL_PCT
 
     if sig.direction == "short":
-        tp_price = 0  # not used — trailing stop instead
-        sl_price = sig.entry_price * (1 + SL_PCT)
+        tp_price = 0
+        sl_price = sig.entry_price * (1 + sl_pct_used)
     else:
         tp_price = 0
-        sl_price = sig.entry_price * (1 - SL_PCT)
+        sl_price = sig.entry_price * (1 - sl_pct_used)
 
     logger.info(
-        f"[DRY-RUN @{threshold}] {sig.direction.upper()} {sig.symbol} "
+        f"[DRY-RUN {strategy}@{threshold}] {sig.direction.upper()} {sig.symbol} "
         f"ml={sig.ml_prob:.2f} entry=${sig.entry_price:.6f} eq=${equity:.2f}"
     )
 
@@ -322,34 +465,36 @@ def open_paper_trade(engine, sig: Signal, threshold: float):
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO paper_trades
-            (source_table, source_id, threshold, symbol, direction, ml_prob,
+            (source_table, source_id, threshold, strategy, symbol, direction, ml_prob,
              entry_time, entry_price, position_usd, tp_price, sl_price, status,
              regime_allowed, venue)
-            VALUES (:st, :sid, :th, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl, 'open',
-                    :regime, :venue)
-            ON CONFLICT (source_table, source_id, threshold) DO NOTHING
+            VALUES (:st, :sid, :th, :strat, :sym, :dir, :ml, :et, :ep, :pos, :tp, :sl,
+                    'open', :regime, :venue)
+            ON CONFLICT (source_table, source_id, threshold, strategy) DO NOTHING
         """), {
             "st": sig.source_table, "sid": sig.source_id, "th": threshold,
-            "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
-            "et": sig.signal_time, "ep": sig.entry_price,
+            "strat": strategy, "sym": sig.symbol, "dir": sig.direction,
+            "ml": sig.ml_prob, "et": sig.signal_time, "ep": sig.entry_price,
             "pos": position_usd, "tp": tp_price, "sl": sl_price,
             "regime": sig.regime_allowed, "venue": venue,
         })
 
 
 def check_and_close_trades(engine):
-    """For each open trade across all thresholds, check trailing stop / SL / timeout."""
+    """For each open trade across all thresholds/strategies, check trail/SL/timeout."""
     with engine.begin() as conn:
         trades = conn.execute(text("""
             SELECT id, symbol, direction, entry_price, entry_time,
-                   position_usd, tp_price, sl_price, threshold, peak_pnl_pct
+                   position_usd, tp_price, sl_price, threshold, peak_pnl_pct,
+                   strategy
             FROM paper_trades WHERE status = 'open'
         """)).fetchall()
 
     for t in trades:
         (trade_id, symbol, direction, entry, entry_time,
-         pos_usd, tp, sl, threshold, peak_pnl) = t
+         pos_usd, tp, sl, threshold, peak_pnl, strategy) = t
         peak_pnl = float(peak_pnl or 0.0)
+        strategy = strategy or V2_STRATEGY
 
         price = fetch_last_price(symbol, venue=venue_for_direction(direction))
         if price is None:
@@ -405,7 +550,7 @@ def check_and_close_trades(engine):
 
         fees = pos_usd * FEE_RATE * 2  # entry + exit
         pnl_usd = pos_usd * pnl_pct - fees
-        equity_after = current_equity(engine, threshold) + pnl_usd
+        equity_after = current_equity(engine, threshold, strategy) + pnl_usd
 
         status = "won" if pnl_usd > 0 else ("lost" if exit_reason == "stop_loss" else "timeout")
 
@@ -440,14 +585,15 @@ def main():
     ensure_paper_table(engine)
 
     logger.info("=" * 60)
-    logger.info("PAPER EXECUTOR (DRY-RUN) — multi-threshold")
-    logger.info(f"Thresholds:      {THRESHOLDS}")
-    logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per threshold")
-    logger.info(f"Position size:   {POSITION_PCT*100:.0f}% @ {LEVERAGE}x")
-    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | SL -{SL_PCT*100:.0f}% | timeout {MAX_BARS_HOLD} bars")
-    logger.info(f"Mode:            SHORT-ONLY (long disabled — PF < 1.0 across all exits)")
+    logger.info("PAPER EXECUTOR (DRY-RUN) — v2 multi-threshold + 7 bigmover accounts")
+    logger.info(f"v2 thresholds:   {THRESHOLDS} (shorts only, sizing {POSITION_PCT*100:.0f}%/{LEVERAGE}x/SL{SL_PCT*100:.0f}%)")
+    logger.info(f"Bigmover:        {len(BIGMOVER_ACCOUNTS)} accounts ({', '.join(a['strategy'] for a in BIGMOVER_ACCOUNTS)})")
+    logger.info(f"Bigmover sizing: {BIGMOVER_POSITION_PCT*100:.0f}%/{BIGMOVER_LEVERAGE}x/SL{BIGMOVER_SL_PCT*100:.0f}% (sweep winner)")
+    logger.info(f"Bigmover cap:    ${BIGMOVER_NOTIONAL_CAP_USD:,.0f} max notional/trade")
+    logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per account")
+    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | timeout {MAX_BARS_HOLD} bars")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
-    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per threshold")
+    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per account")
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")
     logger.info("=" * 60)
 
@@ -458,24 +604,64 @@ def main():
             check_and_close_trades(engine)
 
             new_sigs = fetch_recent_signals(engine)
+            v2_sigs = [s for s in new_sigs if s.signal_type is None]
+            bm_sigs = [s for s in new_sigs if s.signal_type is not None]
 
-            for th in THRESHOLDS:
-                halted = today_pnl_pct(engine, th) <= -MAX_DAILY_LOSS_PCT
+            # v2 accounts (5 ML thresholds) — gated by V2_ENABLED flag.
+            if V2_ENABLED:
+                for th in THRESHOLDS:
+                    halted = today_pnl_pct(engine, th, V2_STRATEGY) <= -MAX_DAILY_LOSS_PCT
+                    if halted:
+                        continue
+                    for sig in v2_sigs:
+                        if sig.ml_prob < th:
+                            continue
+                        if open_positions(engine, th, V2_STRATEGY) >= MAX_OPEN_POSITIONS:
+                            break
+                        open_paper_trade(engine, sig, th, V2_STRATEGY)
+
+            # Bigmover accounts (7 portfolios: 6 single-direction + 1 combined)
+            for acct in BIGMOVER_ACCOUNTS:
+                if not acct.get("enabled", True):
+                    continue
+                halted = today_pnl_pct(
+                    engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
+                ) <= -MAX_DAILY_LOSS_PCT
                 if halted:
                     continue
-                for sig in new_sigs:
-                    if sig.ml_prob < th:
+                for sig in bm_sigs:
+                    if sig.signal_type != acct["signal_type"]:
                         continue
-                    if open_positions(engine, th) >= MAX_OPEN_POSITIONS:
+                    # direction=None on an account means "accept both sides"
+                    # (used by bigmover_multi_bar_confirm_combined).
+                    if acct["direction"] is not None and sig.direction != acct["direction"]:
+                        continue
+                    if open_positions(
+                        engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
+                    ) >= MAX_OPEN_POSITIONS:
                         break
-                    open_paper_trade(engine, sig, th)
+                    open_paper_trade(
+                        engine, sig, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
 
             if cycle % 10 == 0:
                 parts = []
-                for th in THRESHOLDS:
-                    eq = current_equity(engine, th)
-                    op = open_positions(engine, th)
-                    parts.append(f"{th}=${eq:.0f}({op})")
+                if V2_ENABLED:
+                    for th in THRESHOLDS:
+                        eq = current_equity(engine, th, V2_STRATEGY)
+                        op = open_positions(engine, th, V2_STRATEGY)
+                        parts.append(f"v2@{th}=${eq:.0f}({op})")
+                for acct in BIGMOVER_ACCOUNTS:
+                    if not acct.get("enabled", True):
+                        continue
+                    eq = current_equity(
+                        engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
+                    op = open_positions(
+                        engine, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
+                    short_name = acct["strategy"].replace("bigmover_", "bm_")
+                    parts.append(f"{short_name}=${eq:.0f}({op})")
                 logger.info(f"Cycle {cycle}: {' | '.join(parts)}")
 
             time.sleep(POLL_INTERVAL_SEC)

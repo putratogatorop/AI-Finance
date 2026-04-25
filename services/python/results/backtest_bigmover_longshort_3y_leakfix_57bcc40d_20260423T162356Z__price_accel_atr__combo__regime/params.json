@@ -1,0 +1,34 @@
+{
+  "ACCEL_MULT_OF_ATR": 1.0,
+  "COOLDOWN_BARS": 96,
+  "EXIT_PARAMS": {
+    "sl_pct": 0.05,
+    "tp_pct": null,
+    "trail_activation": 0.02,
+    "trail_pct": 0.03
+  },
+  "LEAK_FIXED": true,
+  "LEVERAGE": 5,
+  "MAX_CONCURRENT_POSITIONS": 5,
+  "MAX_HOLD_BARS": 192,
+  "OOT_START_EPOCH_S": 1769126400,
+  "POSITION_PCT": 0.1,
+  "PRICE_LOOKBACK": 96,
+  "PRICE_MOVE_THRESH": 0.05,
+  "REGIME_SMA_FAST": 50,
+  "REGIME_SMA_SLOW": 200,
+  "ROUND_TRIP_FEE": 0.0012,
+  "SNAPSHOT_DATE": "2026-04-24",
+  "START_EQUITY_USD": 100.0,
+  "VOL_SPIKE": 3.0,
+  "directions": [
+    "short",
+    "long"
+  ],
+  "regime_gate": {
+    "long": "bull",
+    "short": "bear"
+  },
+  "signal": "price_accel_atr",
+  "variant_label": "price_accel_atr__combo__regime"
+}

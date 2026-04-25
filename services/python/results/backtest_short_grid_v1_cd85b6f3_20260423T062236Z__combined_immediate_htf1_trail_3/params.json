@@ -1,0 +1,15 @@
+{
+  "LEVERAGE": 5,
+  "MAX_CONCURRENT_POSITIONS": 5,
+  "POSITION_PCT": 0.05,
+  "RANDOM_SEED": 42,
+  "SNAPSHOT_DATE": "2026-04-23",
+  "detector": "combined",
+  "exit_kind": "trail_3",
+  "htf_filter": true,
+  "sl_pct": 0.05,
+  "timing": "immediate",
+  "tp_pct": null,
+  "trail_activation": 0.02,
+  "trail_pct": 0.03
+}
