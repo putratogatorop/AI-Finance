@@ -1,0 +1,52 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "vol_ratio",
+    "price_drop_pct",
+    "price_rise_pct",
+    "accel_atr_norm",
+    "bars_since_high32",
+    "price_vs_ema9_pct",
+    "price_vs_ema50_pct",
+    "rsi14_delta_1bar",
+    "rsi14_delta_4bar",
+    "macd_signal_spread_norm",
+    "macd_hist_momentum",
+    "kdj_j",
+    "kdj_k",
+    "btc_trend_score",
+    "btc_realized_vol_24h",
+    "concurrent_dir_breadth",
+    "is_short"
+  ],
+  "label_thresholds": {
+    "fwd_target": 0.1,
+    "drawdown_cap": 0.04,
+    "max_bars": 192
+  },
+  "train_auc": 0.5764810200383848,
+  "oot_auc": 0.5947546716516235,
+  "cv_aucs": [
+    0.5426582135680301,
+    0.5562860025854117,
+    0.5198118114914729,
+    0.5919986010266702
+  ],
+  "lr_train_auc": 0.5764810200383848,
+  "lr_oot_auc": 0.5947546716516235,
+  "lgbm_train_auc": null,
+  "lgbm_oot_auc": null,
+  "trained_on_n": 283233,
+  "trained_on_pos_rate": 0.16986368113885034,
+  "trained_on_pos_rate_short": 0.16354159177510963,
+  "trained_on_pos_rate_long": 0.17596414671541455,
+  "snapshot_date": "2026-04-01",
+  "trades_csvs": [
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_baseline_short_b198a3ee_20260425T162843Z/trades.csv",
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_baseline_long_b198a3ee_20260425T162843Z/trades.csv",
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_price_accel_atr_short_b198a3ee_20260425T162843Z/trades.csv",
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_price_accel_atr_long_b198a3ee_20260425T162843Z/trades.csv",
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_multi_bar_confirm_short_b198a3ee_20260425T162843Z/trades.csv",
+    "/Users/putratogatorop/Desktop/AI Finance/services/python/results/backtest_bigmover_baseline_protocol_multi_bar_confirm_long_b198a3ee_20260425T162843Z/trades.csv"
+  ]
+}
