@@ -19,11 +19,11 @@ sys.path.insert(0, ".")
 
 import os
 from urllib.parse import urlparse as _urlparse
-_DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
+_DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres@localhost:5432/market")
 _p = _urlparse(_DB_URL)
 DB_CONN = dict(host=_p.hostname, port=_p.port or 5432, dbname=(_p.path or "/").lstrip("/"),
                user=_p.username, password=_p.password)
-CSV_ROOT = Path("C:/Users/togat/Desktop/AI-Finance/data/raw/15m")
+CSV_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw" / "15m"
 
 
 def load_coin_csvs(coin_dir: Path) -> pd.DataFrame:
