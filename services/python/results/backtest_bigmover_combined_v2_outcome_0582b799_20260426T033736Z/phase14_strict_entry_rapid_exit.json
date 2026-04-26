@@ -1,0 +1,168 @@
+{
+  "variants": [
+    "V0_baseline_no_extras",
+    "V1_strict_entry_only",
+    "V2_rapid_rally_exit_only",
+    "V3_strict_entry_plus_rapid_rally_exit"
+  ],
+  "rapid_rally_pct": 0.03,
+  "rapid_rally_lookback_15m": 96,
+  "sweep_results": {
+    "V0_baseline_no_extras": {
+      "train_metrics": {
+        "trades": 63393,
+        "wr": 0.32257504771820233,
+        "pf": 1.1240261844105284,
+        "avg_pnl_pct": 0.002876598313821381,
+        "total_pnl_pct": 182.3561969080788
+      },
+      "oot_metrics": {
+        "trades": 5268,
+        "wr": 0.3967350037965072,
+        "pf": 1.4513775663555073,
+        "avg_pnl_pct": 0.011227974318782733,
+        "total_pnl_pct": 59.148968711347436
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.3674671684788625,
+        "p50": 0.9333615122790865,
+        "p95": 2.048125162536351,
+        "p_lt_1": 0.5,
+        "p_gte_130": 0.4117647058823529
+      },
+      "monte_carlo_oot": {
+        "n": 5268,
+        "point_pf": 1.4513775663555073,
+        "p5": 1.3673564525247586,
+        "p50": 1.4503558109578822,
+        "p95": 1.535830296260444
+      },
+      "exit_reason_counts": {
+        "stop_loss": 44382,
+        "take_profit": 13787,
+        "timeout": 10492
+      }
+    },
+    "V1_strict_entry_only": {
+      "train_metrics": {
+        "trades": 514,
+        "wr": 0.08171206225680934,
+        "pf": 0.2700469938967512,
+        "avg_pnl_pct": -0.031278152647654815,
+        "total_pnl_pct": -16.076970460894575
+      },
+      "oot_metrics": {
+        "trades": 288,
+        "wr": 0.6701388888888888,
+        "pf": 6.028611986760416,
+        "avg_pnl_pct": 0.11164078561528518,
+        "total_pnl_pct": 32.15254625720213
+      },
+      "walkforward": {
+        "n_folds_used": 13,
+        "p5": 0.0,
+        "p50": 0.016819502727206715,
+        "p95": 6.0289774522571244,
+        "p_lt_1": 0.6153846153846154,
+        "p_gte_130": 0.38461538461538464
+      },
+      "monte_carlo_oot": {
+        "n": 288,
+        "point_pf": 6.028611986760416,
+        "p5": 4.900519101888214,
+        "p50": 6.055116109375829,
+        "p95": 7.51855340147407
+      },
+      "exit_reason_counts": {
+        "stop_loss": 561,
+        "take_profit": 222,
+        "timeout": 19
+      }
+    },
+    "V2_rapid_rally_exit_only": {
+      "train_metrics": {
+        "trades": 63393,
+        "wr": 0.3386336030792043,
+        "pf": 1.0047046587883735,
+        "avg_pnl_pct": 9.315284901713515e-05,
+        "total_pnl_pct": 5.905238557743249
+      },
+      "oot_metrics": {
+        "trades": 5268,
+        "wr": 0.42976461655277143,
+        "pf": 1.6678224856359425,
+        "avg_pnl_pct": 0.014013518310141727,
+        "total_pnl_pct": 73.82321445782662
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.3080561872829906,
+        "p50": 0.7419002199090893,
+        "p95": 2.159126336999163,
+        "p_lt_1": 0.5882352941176471,
+        "p_gte_130": 0.38235294117647056
+      },
+      "monte_carlo_oot": {
+        "n": 5268,
+        "point_pf": 1.6678224856359425,
+        "p5": 1.5702126128018024,
+        "p50": 1.6676551255484258,
+        "p95": 1.7671835814120485
+      },
+      "exit_reason_counts": {
+        "stop_loss": 31721,
+        "rapid_rally_exit": 23432,
+        "take_profit": 10148,
+        "timeout": 3360
+      }
+    },
+    "V3_strict_entry_plus_rapid_rally_exit": {
+      "train_metrics": {
+        "trades": 514,
+        "wr": 0.10311284046692606,
+        "pf": 0.27816998475655486,
+        "avg_pnl_pct": -0.030167559208185077,
+        "total_pnl_pct": -15.50612543300713
+      },
+      "oot_metrics": {
+        "trades": 288,
+        "wr": 0.6458333333333334,
+        "pf": 5.96110455222769,
+        "avg_pnl_pct": 0.10894827959107706,
+        "total_pnl_pct": 31.37710452223019
+      },
+      "walkforward": {
+        "n_folds_used": 13,
+        "p5": 0.005193899643177973,
+        "p50": 0.02712984643559283,
+        "p95": 5.961469885536247,
+        "p_lt_1": 0.6153846153846154,
+        "p_gte_130": 0.38461538461538464
+      },
+      "monte_carlo_oot": {
+        "n": 288,
+        "point_pf": 5.96110455222769,
+        "p5": 4.847459333630276,
+        "p50": 5.978402026651295,
+        "p95": 7.429116427336534
+      },
+      "exit_reason_counts": {
+        "stop_loss": 511,
+        "take_profit": 217,
+        "rapid_rally_exit": 72,
+        "timeout": 2
+      }
+    }
+  },
+  "locked": {
+    "name": "V0_baseline_no_extras",
+    "ship_gate": {
+      "oot_pf_ge_130": true,
+      "oot_n_ge_200": true,
+      "wf_p5_gt_1": false,
+      "mc_p5_gt_1": true,
+      "overall": false
+    }
+  }
+}
