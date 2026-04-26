@@ -108,6 +108,73 @@ BIGMOVER_SENTINEL_THRESHOLD = 1.0  # no ML gate; distinguishes rows from v2 ones
 def _is_bigmover_strategy(strategy: str) -> bool:
     return strategy.startswith("bigmover_")
 
+
+def _is_d1e_strategy(strategy: str) -> bool:
+    return strategy.startswith("d1e_")
+
+
+# ── D1e (Phase 17 locked) — paper accounts ───────────────────────────
+#
+# Source: scanner_signals_d1e (written by live_scanner_d1e.py).
+# Each account routes the SAME signal stream through a different
+# (sizing, exit) tuple and tracks its own equity in paper_trades.
+# Threshold sentinel for D1e rows — distinguishes from v2/bigmover.
+D1E_SENTINEL_THRESHOLD = 2.0
+D1E_CLS_THRESHOLD = 0.5010418460370951  # v4 TRAIN q50, locked at training time
+D1E_POSITION_PCT = 0.05      # 5% of equity per trade (CLAUDE.md)
+D1E_LEVERAGE = 5             # 5x leverage (CLAUDE.md)
+D1E_MAX_POS_SCALE = 1.5      # S1/S4 caps. NOTE: gross notional with 5 concurrent
+                             # × 1.5 × 5 × 0.05 = 187.5%, exceeding CLAUDE.md
+                             # 125%; we honor the research config and rely on
+                             # MAX_OPEN_POSITIONS to bound concurrency.
+D1E_MAX_OPEN = 5             # CLAUDE.md MAX_CONCURRENT_POSITIONS
+D1E_NOTIONAL_CAP_USD = float(os.environ.get("D1E_NOTIONAL_CAP_USD", "100000"))
+# E1 fixed-pct exits.
+D1E_E1_SL_PCT = 0.05
+D1E_E1_TP_PCT = 0.15
+# E2 ATR-scaled exits.
+D1E_E2_ATR_SL_MULT = 2.0
+D1E_E2_ATR_TP_MULT = 6.0
+# Both exits share these.
+D1E_TIMEOUT_BARS = 672          # 7 days at 15m
+D1E_RAPID_RALLY_PCT = 0.03
+D1E_RAPID_LOOKBACK_15M = 96     # 24h
+# AUC kill-switch (rolling 60-trade window per account; pause new entries below).
+D1E_AUC_KILL_THRESHOLD = 0.52
+D1E_AUC_KILL_WINDOW = 60
+
+D1E_ACCOUNTS: list[dict] = [
+    # All 4 enabled at deploy. Disable individually after observation if any
+    # account violates kill-switch or PF < 1.0 over a rolling 60-trade window.
+    {"strategy": "d1e_s1_e1", "sizing": "s1", "exit": "e1", "enabled": True},
+    {"strategy": "d1e_s1_e2", "sizing": "s1", "exit": "e2", "enabled": True},
+    {"strategy": "d1e_s4_e1", "sizing": "s4", "exit": "e1", "enabled": True},
+    {"strategy": "d1e_s4_e2", "sizing": "s4", "exit": "e2", "enabled": True},
+]
+
+
+def _sizing_s1(btc_score: float, cls_score: float) -> float:
+    """Phase 17 S1: linear sign-locked Candidate-B BTC trend score sizing.
+    Returns 0 when btc_score >= 0 (no SHORT entries against an up-trending BTC).
+    """
+    if not (btc_score is not None and btc_score == btc_score):  # nan-safe
+        return 0.0
+    if btc_score >= 0:
+        return 0.0
+    return min(D1E_MAX_POS_SCALE * abs(float(btc_score)), D1E_MAX_POS_SCALE)
+
+
+def _sizing_s4(btc_score: float, cls_score: float) -> float:
+    """Phase 17 S4: classifier-confidence-weighted sizing.
+    Zeroes out low-confidence trades; max scale at cls_score == 1.0.
+    """
+    if not (cls_score is not None and cls_score == cls_score):
+        return 0.0
+    return max(0.0, min(3.0 * (float(cls_score) - 0.5), D1E_MAX_POS_SCALE))
+
+
+_SIZING_FNS = {"s1": _sizing_s1, "s4": _sizing_s4}
+
 # Portfolio sim
 STARTING_EQUITY_USD = 100.0   # paper $100; adjust to match what you'd start live
 POSITION_PCT = 0.10           # 10% of equity per trade (matches backtest)
@@ -318,6 +385,22 @@ def ensure_paper_table(engine):
             CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_src_threshold_strategy
             ON paper_trades (source_table, source_id, threshold, strategy)
         """))
+        # D1e per-trade context (added 2026-04-26 with Phase 17 deploy).
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS atr14_at_entry DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS btc_score DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS cls_score DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS pos_scale DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS exit_kind VARCHAR(8)"
+        ))
 
 
 # ── Paper trade logic ────────────────────────────────────────────────
@@ -334,6 +417,11 @@ class Signal:
     regime_allowed: bool | None  # None for pre-migration rows
     # Bigmover-only: None for v2 signals, else one of the SIGNALS constants
     signal_type: str | None = None
+    # D1e-only (None for v2/bigmover signals)
+    atr14_at_entry: float | None = None
+    btc_score: float | None = None
+    cls_score: float | None = None
+    cls_kept: bool | None = None
 
 
 def fetch_recent_signals(engine) -> list[Signal]:
@@ -394,6 +482,33 @@ def fetch_recent_signals(engine) -> list[Signal]:
                 signal_time=r[4], entry_price=float(r[5]),
                 regime_allowed=r[6],
                 signal_type=r[2],
+            ))
+
+        # D1e signals (Phase 17, SHORT-only) — table may not exist if scanner
+        # hasn't deployed yet; skip silently in that case.
+        try:
+            d1e_rows = conn.execute(text("""
+                SELECT id, symbol, direction, signal_time, entry_price,
+                       atr14_at_entry, btc_score, cls_score, cls_kept
+                FROM scanner_signals_d1e
+                WHERE status = 'active'
+                  AND signal_time >= NOW() - INTERVAL '48 hours'
+                ORDER BY signal_time
+            """)).fetchall()
+        except Exception:
+            d1e_rows = []
+        for r in d1e_rows:
+            signals.append(Signal(
+                source_table="scanner_signals_d1e",
+                source_id=r[0], symbol=r[1], direction=r[2],
+                ml_prob=float(r[7] or 0.0),  # cls_score doubles as ml_prob for logging
+                signal_time=r[3], entry_price=float(r[4]),
+                regime_allowed=None,
+                signal_type="d1e",
+                atr14_at_entry=float(r[5]) if r[5] is not None else None,
+                btc_score=float(r[6]) if r[6] is not None else None,
+                cls_score=float(r[7]) if r[7] is not None else None,
+                cls_kept=bool(r[8]) if r[8] is not None else None,
             ))
 
     return signals
@@ -480,6 +595,159 @@ def open_paper_trade(
         })
 
 
+def open_d1e_paper_trade(engine, sig: Signal, account: dict):
+    """Open a paper trade on a D1e signal under one S×E account spec.
+
+    `account` carries `strategy`, `sizing` (s1|s4), `exit` (e1|e2). Sizing is
+    computed from `sig.btc_score` / `sig.cls_score`; SL/TP from `account['exit']`
+    using the locked Phase 17 params.
+    """
+    if sig.direction != "short":
+        return  # D1e is SHORT-only by research design
+    if sig.cls_kept is False:
+        return  # paper executor honors the v4 gate
+    sizing_fn = _SIZING_FNS.get(account["sizing"])
+    if sizing_fn is None:
+        return
+    pos_scale = sizing_fn(
+        sig.btc_score if sig.btc_score is not None else float("nan"),
+        sig.cls_score if sig.cls_score is not None else float("nan"),
+    )
+    if pos_scale <= 0:
+        return  # sign-locked or low-confidence — skip without recording
+
+    equity = current_equity(engine, D1E_SENTINEL_THRESHOLD, account["strategy"])
+    desired_notional = equity * D1E_POSITION_PCT * D1E_LEVERAGE * pos_scale
+    position_usd = min(desired_notional, D1E_NOTIONAL_CAP_USD)
+    if position_usd <= 0:
+        return
+
+    # Exit setup
+    if account["exit"] == "e1":
+        sl_price = sig.entry_price * (1 + D1E_E1_SL_PCT)
+        tp_price = sig.entry_price * (1 - D1E_E1_TP_PCT)
+    elif account["exit"] == "e2":
+        atr = sig.atr14_at_entry
+        if atr is None or not (atr > 0):
+            return  # cannot run E2 without ATR
+        sl_price = sig.entry_price + D1E_E2_ATR_SL_MULT * atr
+        tp_price = max(sig.entry_price - D1E_E2_ATR_TP_MULT * atr, 0.0)
+    else:
+        return
+
+    venue = venue_for_direction(sig.direction)
+    logger.info(
+        f"[DRY-RUN {account['strategy']}] SHORT {sig.symbol} "
+        f"size={pos_scale:.2f} btc={sig.btc_score:+.3f} cls={sig.cls_score:.3f} "
+        f"entry=${sig.entry_price:.6f} sl=${sl_price:.6f} tp=${tp_price:.6f} "
+        f"eq=${equity:.2f}"
+    )
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO paper_trades
+            (source_table, source_id, threshold, strategy, symbol, direction, ml_prob,
+             entry_time, entry_price, position_usd, tp_price, sl_price, status,
+             regime_allowed, venue,
+             atr14_at_entry, btc_score, cls_score, pos_scale, exit_kind)
+            VALUES (:st, :sid, :th, :strat, :sym, 'short', :ml, :et, :ep, :pos,
+                    :tp, :sl, 'open', NULL, :venue,
+                    :atr, :bs, :cs, :psc, :ek)
+            ON CONFLICT (source_table, source_id, threshold, strategy) DO NOTHING
+        """), {
+            "st": sig.source_table, "sid": sig.source_id,
+            "th": D1E_SENTINEL_THRESHOLD, "strat": account["strategy"],
+            "sym": sig.symbol, "ml": sig.ml_prob, "et": sig.signal_time,
+            "ep": sig.entry_price, "pos": position_usd, "tp": tp_price, "sl": sl_price,
+            "venue": venue,
+            "atr": sig.atr14_at_entry, "bs": sig.btc_score, "cs": sig.cls_score,
+            "psc": pos_scale, "ek": account["exit"],
+        })
+
+
+# ── Rapid-rally cache (E1 + E2 share this exit signal) ──────────────
+
+_rapid_rally_state: dict = {"active": False, "checked_at": 0.0}
+
+
+def _btc_daily_bearish() -> bool:
+    """Compute BTC daily ALL-BEARISH using EMA 9/21/50 + RSI<50 + MACD<sig + KDJ K<D.
+    Mirrors phase17_sizing_compare._build_rapid_exit_panel logic. shift(1) so
+    we use yesterday's daily indicator values (no lookahead at boundary).
+    """
+    import numpy as np
+    import pandas as pd
+    from src.ml.indicators import atr as _atr  # noqa: F401
+    from src.ml.indicators import ema as _ema, kdj as _kdj, macd as _macd, rsi as _rsi
+    eng = create_engine(DB_URL)
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT timestamp, open, high, low, close
+                FROM asset_prices_15m WHERE asset = 'BTCUSDT'
+                ORDER BY timestamp DESC LIMIT 20000
+            """)).fetchall()
+    finally:
+        eng.dispose()
+    if not rows or len(rows) < 200 * 96:
+        return False
+    df = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close"])
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    daily = (df.set_index("timestamp")
+               .resample("1D", label="right", closed="right")
+               .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+               .dropna())
+    if len(daily) < 60:
+        return False
+    ema_fast = _ema(daily["close"], 9).shift(1)
+    ema_mid = _ema(daily["close"], 21).shift(1)
+    ema_slow = _ema(daily["close"], 50).shift(1)
+    ema_cond = (daily["close"].shift(1) < ema_fast) & (ema_fast < ema_mid) & (ema_mid < ema_slow)
+    rsi_cond = _rsi(daily["close"], 14).shift(1) < 50.0
+    md = _macd(daily["close"], 12, 26, 9)
+    macd_cond = md["macd"].shift(1) < md["signal"].shift(1)
+    kdj_v = _kdj(daily["high"], daily["low"], daily["close"], n=9, k_smooth=3, d_smooth=3)
+    kdj_cond = kdj_v["k"].shift(1) < kdj_v["d"].shift(1)
+    daily_bear = (ema_cond & rsi_cond & macd_cond & kdj_cond).fillna(False)
+    return bool(daily_bear.iloc[-1])
+
+
+def _btc_24h_return() -> float:
+    """BTC 24h return from latest 15m bars."""
+    import pandas as pd
+    eng = create_engine(DB_URL)
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT timestamp, close FROM asset_prices_15m
+                WHERE asset = 'BTCUSDT'
+                ORDER BY timestamp DESC LIMIT 100
+            """)).fetchall()
+    finally:
+        eng.dispose()
+    if not rows or len(rows) < D1E_RAPID_LOOKBACK_15M + 1:
+        return 0.0
+    df = pd.DataFrame(rows, columns=["timestamp", "close"]).iloc[::-1]
+    return float(df["close"].iloc[-1] / df["close"].iloc[-D1E_RAPID_LOOKBACK_15M - 1] - 1.0)
+
+
+def rapid_rally_active() -> bool:
+    """True iff (NOT BTC daily ALL-BEARISH) AND (BTC 24h return > +3%).
+    Cached for 5 minutes; recomputed lazily on next check.
+    """
+    now = time.time()
+    if now - _rapid_rally_state["checked_at"] > 300:
+        try:
+            bear = _btc_daily_bearish()
+            ret24 = _btc_24h_return()
+            _rapid_rally_state["active"] = (not bear) and ret24 > D1E_RAPID_RALLY_PCT
+        except Exception as e:
+            logger.warning(f"rapid_rally check failed: {e}")
+            _rapid_rally_state["active"] = False
+        _rapid_rally_state["checked_at"] = now
+    return bool(_rapid_rally_state["active"])
+
+
 def check_and_close_trades(engine):
     """For each open trade across all thresholds/strategies, check trail/SL/timeout."""
     with engine.begin() as conn:
@@ -514,14 +782,17 @@ def check_and_close_trades(engine):
                     "UPDATE paper_trades SET peak_pnl_pct = :peak WHERE id = :id"
                 ), {"peak": peak_pnl, "id": trade_id})
 
-        # Timeout check — 192 bars * 15 min = 48h
+        # Timeout check — D1e uses 672-bar (7d) timeout, others use 192-bar (48h).
         age_sec = (datetime.now(timezone.utc) - entry_time).total_seconds()
         age_bars = age_sec / (15 * 60)
 
         exit_price = None
         exit_reason = None
 
-        # 1. Hard stop-loss
+        is_d1e = _is_d1e_strategy(strategy)
+        timeout_bars = D1E_TIMEOUT_BARS if is_d1e else MAX_BARS_HOLD
+
+        # 1. Hard stop-loss (price-based, both v2/bigmover and D1e)
         if direction == "long":
             if price <= sl:
                 exit_price, exit_reason = sl, "stop_loss"
@@ -529,14 +800,25 @@ def check_and_close_trades(engine):
             if price >= sl:
                 exit_price, exit_reason = sl, "stop_loss"
 
-        # 2. Trailing stop: activate after +TRAIL_ACTIVATION%, exit on TRAIL_PCT% drawdown
-        if exit_reason is None and peak_pnl >= TRAIL_ACTIVATION:
-            drawdown_from_peak = peak_pnl - cur_pnl
-            if drawdown_from_peak >= TRAIL_PCT:
-                exit_price, exit_reason = price, "trail_stop"
+        if is_d1e:
+            # D1e exit stack: SL (above), then TP (price-based), then rapid-rally,
+            # then timeout. NO trail-stop — research config doesn't use it.
+            if exit_reason is None and tp is not None and tp > 0:
+                if direction == "short" and price <= tp:
+                    exit_price, exit_reason = tp, "take_profit"
+                elif direction == "long" and price >= tp:
+                    exit_price, exit_reason = tp, "take_profit"
+            if exit_reason is None and rapid_rally_active():
+                exit_price, exit_reason = price, "rapid_rally"
+        else:
+            # Legacy v2/bigmover: trail-stop after +TRAIL_ACTIVATION peak.
+            if exit_reason is None and peak_pnl >= TRAIL_ACTIVATION:
+                drawdown_from_peak = peak_pnl - cur_pnl
+                if drawdown_from_peak >= TRAIL_PCT:
+                    exit_price, exit_reason = price, "trail_stop"
 
-        # 3. Timeout
-        if exit_reason is None and age_bars >= MAX_BARS_HOLD:
+        # Final: timeout (per-strategy bar count)
+        if exit_reason is None and age_bars >= timeout_bars:
             exit_price, exit_reason = price, "timeout"
 
         if exit_reason is None:
@@ -585,15 +867,28 @@ def main():
     ensure_paper_table(engine)
 
     logger.info("=" * 60)
-    logger.info("PAPER EXECUTOR (DRY-RUN) — v2 multi-threshold + 7 bigmover accounts")
-    logger.info(f"v2 thresholds:   {THRESHOLDS} (shorts only, sizing {POSITION_PCT*100:.0f}%/{LEVERAGE}x/SL{SL_PCT*100:.0f}%)")
-    logger.info(f"Bigmover:        {len(BIGMOVER_ACCOUNTS)} accounts ({', '.join(a['strategy'] for a in BIGMOVER_ACCOUNTS)})")
-    logger.info(f"Bigmover sizing: {BIGMOVER_POSITION_PCT*100:.0f}%/{BIGMOVER_LEVERAGE}x/SL{BIGMOVER_SL_PCT*100:.0f}% (sweep winner)")
-    logger.info(f"Bigmover cap:    ${BIGMOVER_NOTIONAL_CAP_USD:,.0f} max notional/trade")
+    logger.info("PAPER EXECUTOR (DRY-RUN) — v2 + bigmover + D1e (Phase 17)")
+    logger.info(f"v2 thresholds:   {THRESHOLDS} (V2_ENABLED={V2_ENABLED})")
+    logger.info(
+        f"Bigmover:        {sum(1 for a in BIGMOVER_ACCOUNTS if a.get('enabled'))}"
+        f" of {len(BIGMOVER_ACCOUNTS)} accounts enabled"
+    )
+    enabled_d1e = [a['strategy'] for a in D1E_ACCOUNTS if a.get('enabled')]
+    logger.info(f"D1e accounts:    {len(enabled_d1e)} enabled — {', '.join(enabled_d1e)}")
+    logger.info(
+        f"D1e sizing:      {D1E_POSITION_PCT*100:.0f}%/{D1E_LEVERAGE}x × pos_scale "
+        f"(S1: |btc|, S4: cls-0.5; cap {D1E_MAX_POS_SCALE})"
+    )
+    logger.info(
+        f"D1e exits:       E1=fixed SL{D1E_E1_SL_PCT*100:.0f}%/TP{D1E_E1_TP_PCT*100:.0f}%, "
+        f"E2=ATR ×{D1E_E2_ATR_SL_MULT}/×{D1E_E2_ATR_TP_MULT}, "
+        f"timeout {D1E_TIMEOUT_BARS} bars (7d), "
+        f"rapid-rally on +{D1E_RAPID_RALLY_PCT*100:.0f}% BTC 24h"
+    )
+    logger.info(f"D1e notional cap: ${D1E_NOTIONAL_CAP_USD:,.0f} per trade")
     logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per account")
-    logger.info(f"Exit:            trail {TRAIL_PCT*100:.0f}% (activate >{TRAIL_ACTIVATION*100:.0f}%) | timeout {MAX_BARS_HOLD} bars")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
-    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} per account")
+    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} (legacy) / {D1E_MAX_OPEN} (D1e) per account")
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")
     logger.info("=" * 60)
 
@@ -605,7 +900,9 @@ def main():
 
             new_sigs = fetch_recent_signals(engine)
             v2_sigs = [s for s in new_sigs if s.signal_type is None]
-            bm_sigs = [s for s in new_sigs if s.signal_type is not None]
+            bm_sigs = [s for s in new_sigs
+                       if s.signal_type is not None and s.signal_type != "d1e"]
+            d1e_sigs = [s for s in new_sigs if s.signal_type == "d1e"]
 
             # v2 accounts (5 ML thresholds) — gated by V2_ENABLED flag.
             if V2_ENABLED:
@@ -644,6 +941,22 @@ def main():
                         engine, sig, BIGMOVER_SENTINEL_THRESHOLD, acct["strategy"]
                     )
 
+            # D1e accounts (Phase 17 locked, SHORT-only).
+            for acct in D1E_ACCOUNTS:
+                if not acct.get("enabled", True):
+                    continue
+                halted = today_pnl_pct(
+                    engine, D1E_SENTINEL_THRESHOLD, acct["strategy"]
+                ) <= -MAX_DAILY_LOSS_PCT
+                if halted:
+                    continue
+                for sig in d1e_sigs:
+                    if open_positions(
+                        engine, D1E_SENTINEL_THRESHOLD, acct["strategy"]
+                    ) >= D1E_MAX_OPEN:
+                        break
+                    open_d1e_paper_trade(engine, sig, acct)
+
             if cycle % 10 == 0:
                 parts = []
                 if V2_ENABLED:
@@ -662,6 +975,16 @@ def main():
                     )
                     short_name = acct["strategy"].replace("bigmover_", "bm_")
                     parts.append(f"{short_name}=${eq:.0f}({op})")
+                for acct in D1E_ACCOUNTS:
+                    if not acct.get("enabled", True):
+                        continue
+                    eq = current_equity(
+                        engine, D1E_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
+                    op = open_positions(
+                        engine, D1E_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
+                    parts.append(f"{acct['strategy']}=${eq:.0f}({op})")
                 logger.info(f"Cycle {cycle}: {' | '.join(parts)}")
 
             time.sleep(POLL_INTERVAL_SEC)
