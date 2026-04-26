@@ -1,0 +1,240 @@
+{
+  "phase": "17.A",
+  "snapshot_date": "2026-04-01",
+  "detectors": [
+    "D1a_atr_only",
+    "D1_baseline",
+    "D1c_lower_low",
+    "D1d_fresh_breakdown",
+    "D1e_breadth"
+  ],
+  "phase15_d1_baseline_used_in_gates": {
+    "oot_pf": 2.064,
+    "wf_p5": 0.605
+  },
+  "sweep_results": {
+    "D1a_atr_only": {
+      "train_metrics": {
+        "trades": 89291,
+        "wr": 0.3662519178864611,
+        "pf": 0.9912410822756005,
+        "avg_pnl_pct": -0.00013549139511443198,
+        "total_pnl_pct": -12.098162161162747
+      },
+      "oot_metrics": {
+        "trades": 7107,
+        "wr": 0.43618967215421417,
+        "pf": 1.6073957092708173,
+        "avg_pnl_pct": 0.010537824574733384,
+        "total_pnl_pct": 74.89231925263016
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.47690888672565596,
+        "p50": 0.8832226690725168,
+        "p95": 1.8592103678430378,
+        "p_lt_1": 0.5588235294117647,
+        "p_gte_130": 0.29411764705882354
+      },
+      "monte_carlo_oot": {
+        "n": 7107,
+        "point_pf": 1.6073957092708173,
+        "p5": 1.5230705312768975,
+        "p50": 1.606222293345024,
+        "p95": 1.6982159507058883
+      },
+      "exit_counts": {
+        "rapid": 40899,
+        "sl": 36886,
+        "tp": 11581,
+        "timeout": 7032
+      }
+    },
+    "D1_baseline": {
+      "train_metrics": {
+        "trades": 69451,
+        "wr": 0.41427769218585764,
+        "pf": 1.3055154809003275,
+        "avg_pnl_pct": 0.004220427029929179,
+        "total_pnl_pct": 293.1128776556114
+      },
+      "oot_metrics": {
+        "trades": 5474,
+        "wr": 0.48721227621483376,
+        "pf": 2.064340370154085,
+        "avg_pnl_pct": 0.016742007483378504,
+        "total_pnl_pct": 91.64574896401393
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.6052946247178129,
+        "p50": 1.3027418122637204,
+        "p95": 2.3419294390031125,
+        "p_lt_1": 0.2647058823529412,
+        "p_gte_130": 0.5
+      },
+      "monte_carlo_oot": {
+        "n": 5474,
+        "point_pf": 2.064340370154085,
+        "p5": 1.947449611110151,
+        "p50": 2.065357175810199,
+        "p95": 2.194135949175729
+      },
+      "exit_counts": {
+        "rapid": 32752,
+        "sl": 26077,
+        "tp": 10358,
+        "timeout": 5738
+      }
+    },
+    "D1c_lower_low": {
+      "train_metrics": {
+        "trades": 64146,
+        "wr": 0.4195896860287469,
+        "pf": 1.3372657843530737,
+        "avg_pnl_pct": 0.0045902855363864565,
+        "total_pnl_pct": 294.44845601704566
+      },
+      "oot_metrics": {
+        "trades": 4987,
+        "wr": 0.4992981752556647,
+        "pf": 2.2865023541706493,
+        "avg_pnl_pct": 0.01898864080824153,
+        "total_pnl_pct": 94.69635171070051
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.6026476572493341,
+        "p50": 1.3179785625675122,
+        "p95": 2.458376651236761,
+        "p_lt_1": 0.2647058823529412,
+        "p_gte_130": 0.5
+      },
+      "monte_carlo_oot": {
+        "n": 4987,
+        "point_pf": 2.2865023541706493,
+        "p5": 2.14745138976903,
+        "p50": 2.286458417004938,
+        "p95": 2.4404942077293885
+      },
+      "exit_counts": {
+        "rapid": 30216,
+        "sl": 23747,
+        "tp": 9753,
+        "timeout": 5417
+      }
+    },
+    "D1d_fresh_breakdown": {
+      "train_metrics": {
+        "trades": 34370,
+        "wr": 0.4162350887401804,
+        "pf": 1.2271579953603633,
+        "avg_pnl_pct": 0.003207501061406384,
+        "total_pnl_pct": 110.24181148053742
+      },
+      "oot_metrics": {
+        "trades": 2703,
+        "wr": 0.46762856085830556,
+        "pf": 1.9205312509441466,
+        "avg_pnl_pct": 0.015366737827685845,
+        "total_pnl_pct": 41.53629234823484
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.5856501484156601,
+        "p50": 1.2733640059109617,
+        "p95": 2.122138001845836,
+        "p_lt_1": 0.3235294117647059,
+        "p_gte_130": 0.47058823529411764
+      },
+      "monte_carlo_oot": {
+        "n": 2703,
+        "point_pf": 1.9205312509441466,
+        "p5": 1.7571872600105933,
+        "p50": 1.9177438483223628,
+        "p95": 2.0894654364679766
+      },
+      "exit_counts": {
+        "rapid": 16612,
+        "sl": 12780,
+        "tp": 4925,
+        "timeout": 2756
+      }
+    },
+    "D1e_breadth": {
+      "train_metrics": {
+        "trades": 57807,
+        "wr": 0.4208832840313457,
+        "pf": 1.3925024295319974,
+        "avg_pnl_pct": 0.005260640995477337,
+        "total_pnl_pct": 304.10187402555846
+      },
+      "oot_metrics": {
+        "trades": 4500,
+        "wr": 0.5068888888888889,
+        "pf": 2.3989133319062432,
+        "avg_pnl_pct": 0.020331005720469246,
+        "total_pnl_pct": 91.48952574211161
+      },
+      "walkforward": {
+        "n_folds_used": 34,
+        "p5": 0.6203582652494205,
+        "p50": 1.32471009198531,
+        "p95": 2.583663830005731,
+        "p_lt_1": 0.2647058823529412,
+        "p_gte_130": 0.5
+      },
+      "monte_carlo_oot": {
+        "n": 4500,
+        "point_pf": 2.3989133319062432,
+        "p5": 2.2408502711723086,
+        "p50": 2.399007034429818,
+        "p95": 2.564008612906991
+      },
+      "exit_counts": {
+        "rapid": 26483,
+        "sl": 21644,
+        "tp": 9087,
+        "timeout": 5093
+      }
+    }
+  },
+  "locked": {
+    "name": "D1e_breadth",
+    "decision": "ADOPT D1e_breadth",
+    "gate": {
+      "train_pf_is_max": true,
+      "oot_n_ge_200": true,
+      "oot_pf_ge_phase15_baseline": true,
+      "wf_p5_ge_phase15_baseline": true,
+      "overall_win": true
+    }
+  },
+  "reproducibility": {
+    "variant": "D1e_breadth",
+    "first_hash": 7383329262625439100,
+    "second_hash": 7383329262625439100,
+    "byte_identical": true
+  },
+  "constants": {
+    "STOP_LOSS_PCT": 0.05,
+    "TAKE_PROFIT_PCT": 0.15,
+    "TIMEOUT_BARS": 672,
+    "FRICTION_PCT": 0.0015,
+    "VOL_MA_PERIOD": 20,
+    "PRICE_LOOKBACK": 96,
+    "ATR_PERIOD": 14,
+    "COOLDOWN_BARS": 96,
+    "BTC_TREND_K": 0.005255,
+    "RAPID_RALLY_PCT": 0.03,
+    "BREADTH_4H_LOOKBACK": 16,
+    "BREADTH_THRESHOLD": 0.6,
+    "BARS_SINCE_HIGH_LOOKBACK": 32,
+    "BARS_SINCE_HIGH_MAX": 4,
+    "LOWER_LOW_LOOKBACK": 3,
+    "WF_FOLD_MONTHS": 3,
+    "RANDOM_SEED": 42,
+    "MC_N_RESAMPLES": 5000,
+    "TRAIN_OOT_BOUNDARY": "2026-01-01 00:00:00+00:00"
+  }
+}

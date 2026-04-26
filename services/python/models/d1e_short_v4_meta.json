@@ -1,0 +1,38 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "vol_ratio",
+    "price_drop_pct",
+    "price_rise_pct",
+    "accel_atr_norm",
+    "bars_since_high32",
+    "price_vs_ema9_pct",
+    "price_vs_ema50_pct",
+    "rsi14_delta_1bar",
+    "rsi14_delta_4bar",
+    "macd_signal_spread_norm",
+    "macd_hist_momentum",
+    "kdj_j",
+    "kdj_k",
+    "btc_trend_score",
+    "btc_realized_vol_24h",
+    "concurrent_dir_breadth",
+    "is_short"
+  ],
+  "label_kind": "outcome",
+  "detector": "D1e (D1 + universe-down-breadth >= 0.6)",
+  "lr_C": 1.0,
+  "purge_bars": 192,
+  "cv_aucs": [
+    0.5259373712402142,
+    0.5672834442052066,
+    0.510284757515353,
+    0.5619882556319297
+  ],
+  "train_auc": 0.5644082075147925,
+  "oot_auc": 0.5374345243639722,
+  "threshold_train_q50": 0.5010418460370951,
+  "trained_on_n": 57805,
+  "trained_on_pos_rate": 0.42086324712395123,
+  "snapshot_date": "2026-04-01"
+}
