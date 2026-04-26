@@ -1,0 +1,38 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "btc_30d_return",
+    "btc_90d_return",
+    "btc_180d_return",
+    "btc_30d_realized_vol",
+    "btc_vs_sma200_pct",
+    "btc_vs_ema26_weekly_pct",
+    "btc_macd_4h_signal_spread_norm",
+    "btc_rsi14_daily",
+    "btc_rsi14_daily_5bar_delta",
+    "btc_kdj_j_daily",
+    "btc_bbands_pct_b_daily",
+    "btc_volume_5d_zscore"
+  ],
+  "label": "fwd_3mo_short_only_pf_ge_1.0",
+  "C": 0.1,
+  "train_auc": 0.93125,
+  "oot_auc": null,
+  "train_n_windows": 26,
+  "oot_n_windows": 1,
+  "feature_coefficients_scaled": {
+    "btc_30d_return": -0.14551901469050613,
+    "btc_90d_return": 0.04089163017748542,
+    "btc_180d_return": 0.3371903095761733,
+    "btc_30d_realized_vol": -0.07592282240734363,
+    "btc_vs_sma200_pct": 0.13578538458723824,
+    "btc_vs_ema26_weekly_pct": 0.0998807295182506,
+    "btc_macd_4h_signal_spread_norm": 0.10221313685705893,
+    "btc_rsi14_daily": -0.3043005775353103,
+    "btc_rsi14_daily_5bar_delta": 0.10987929381046221,
+    "btc_kdj_j_daily": 0.09578401550068634,
+    "btc_bbands_pct_b_daily": -0.16044413257240484,
+    "btc_volume_5d_zscore": 0.15680882939817054
+  },
+  "snapshot_date": "2026-04-01"
+}

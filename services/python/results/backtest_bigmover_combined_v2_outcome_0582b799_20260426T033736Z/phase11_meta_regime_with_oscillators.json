@@ -1,0 +1,146 @@
+{
+  "feature_names": [
+    "btc_30d_return",
+    "btc_90d_return",
+    "btc_180d_return",
+    "btc_30d_realized_vol",
+    "btc_vs_sma200_pct",
+    "btc_vs_ema26_weekly_pct",
+    "btc_macd_4h_signal_spread_norm",
+    "btc_rsi14_daily",
+    "btc_rsi14_daily_5bar_delta",
+    "btc_kdj_j_daily",
+    "btc_bbands_pct_b_daily",
+    "btc_volume_5d_zscore"
+  ],
+  "trend_features": [
+    "btc_30d_return",
+    "btc_90d_return",
+    "btc_180d_return",
+    "btc_30d_realized_vol",
+    "btc_vs_sma200_pct",
+    "btc_vs_ema26_weekly_pct",
+    "btc_macd_4h_signal_spread_norm"
+  ],
+  "oscillator_features": [
+    "btc_rsi14_daily",
+    "btc_rsi14_daily_5bar_delta",
+    "btc_kdj_j_daily",
+    "btc_bbands_pct_b_daily",
+    "btc_volume_5d_zscore"
+  ],
+  "ml_meta_regime_v2": {
+    "model": "logistic_regression",
+    "C": 0.1,
+    "train_auc": 0.93125,
+    "oot_auc": null,
+    "train_n_windows": 26,
+    "oot_n_windows": 1,
+    "feature_coefficients_scaled": {
+      "btc_30d_return": -0.14551901469050613,
+      "btc_90d_return": 0.04089163017748542,
+      "btc_180d_return": 0.3371903095761733,
+      "btc_30d_realized_vol": -0.07592282240734363,
+      "btc_vs_sma200_pct": 0.13578538458723824,
+      "btc_vs_ema26_weekly_pct": 0.0998807295182506,
+      "btc_macd_4h_signal_spread_norm": 0.10221313685705893,
+      "btc_rsi14_daily": -0.3043005775353103,
+      "btc_rsi14_daily_5bar_delta": 0.10987929381046221,
+      "btc_kdj_j_daily": 0.09578401550068634,
+      "btc_bbands_pct_b_daily": -0.16044413257240484,
+      "btc_volume_5d_zscore": 0.15680882939817054
+    },
+    "threshold": 0.5,
+    "n_train_gated": 28469,
+    "n_oot_gated": 2103,
+    "ship_gate": {
+      "oot_pf_ge_130": true,
+      "oot_n_ge_200": true,
+      "wf_p5_gt_1": false,
+      "mc_p5_gt_1": true,
+      "overall": false
+    }
+  },
+  "hand_crafted_rules": {
+    "R0_baseline_no_rule": {
+      "train_n": 63393,
+      "train_pf": 1.1240261844105293,
+      "oot_n": 5268,
+      "oot_pf": 1.4513775663555086,
+      "wf_p5": 0.36746716847886285,
+      "wf_p50": 0.9333615122790874,
+      "wf_p_lt_1": 0.5,
+      "mc_p5": 1.36735645252476
+    },
+    "R1_skip_rsi_lt_20": {
+      "train_n": 63285,
+      "train_pf": 1.1246833184759775,
+      "oot_n": 4933,
+      "oot_pf": 1.595652070972751,
+      "wf_p5": 0.36905268247512235,
+      "wf_p50": 0.9333615122790874,
+      "wf_p_lt_1": 0.5,
+      "mc_p5": 1.5041865567202364
+    },
+    "R2_skip_kdj_j_lt_neg10": {
+      "train_n": 62463,
+      "train_pf": 1.1389706914414246,
+      "oot_n": 5107,
+      "oot_pf": 1.472408749482711,
+      "wf_p5": 0.36746716847886285,
+      "wf_p50": 0.9335005389821784,
+      "wf_p_lt_1": 0.5,
+      "mc_p5": 1.386080206951053
+    },
+    "R3_skip_bb_pct_b_lt_0p05": {
+      "train_n": 61529,
+      "train_pf": 1.1299438204770904,
+      "oot_n": 4072,
+      "oot_pf": 0.8582231428896879,
+      "wf_p5": 0.36905268247512235,
+      "wf_p50": 0.8621156495790487,
+      "wf_p_lt_1": 0.5588235294117647,
+      "mc_p5": 0.7992129729847175
+    },
+    "R4_skip_vol_z_gt_2p5": {
+      "train_n": 60992,
+      "train_pf": 1.164722612949014,
+      "oot_n": 4533,
+      "oot_pf": 1.1220015220968111,
+      "wf_p5": 0.30918999115206647,
+      "wf_p50": 1.0259266272975576,
+      "wf_p_lt_1": 0.5,
+      "mc_p5": 1.0504795633911923
+    },
+    "R5_skip_any_whipsaw_signal": {
+      "train_n": 58510,
+      "train_pf": 1.1823474322311591,
+      "oot_n": 3911,
+      "oot_pf": 0.8666744170217124,
+      "wf_p5": 0.31059628316140053,
+      "wf_p50": 0.9170356059531984,
+      "wf_p_lt_1": 0.5588235294117647,
+      "mc_p5": 0.8045118941712309
+    },
+    "R6_skip_rsi_lt_25_AND_bb_lt_0p10": {
+      "train_n": 62778,
+      "train_pf": 1.1349896435181168,
+      "oot_n": 4093,
+      "oot_pf": 0.8580770529106927,
+      "wf_p5": 0.36905268247512235,
+      "wf_p50": 0.8621837214898896,
+      "wf_p_lt_1": 0.5588235294117647,
+      "mc_p5": 0.7951626258328995
+    },
+    "R7_phase10.1_T0.10_AND_whipsaw_guard": {
+      "train_n": 31306,
+      "train_pf": 1.3367561682958147,
+      "oot_n": 3911,
+      "oot_pf": 0.8666744170217124,
+      "wf_p5": 0.5221586886207513,
+      "wf_p50": 0.9706109510362206,
+      "wf_p_lt_1": 0.5357142857142857,
+      "mc_p5": 0.8045118941712309
+    }
+  }
+}
