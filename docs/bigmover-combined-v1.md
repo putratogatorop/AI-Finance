@@ -904,10 +904,24 @@ The strategy now passes the 8-point ship gate. Two ship-passing configs are
 on the table, picked from the Phase 17.D 4×4 grid and re-verified on the
 D1e+v4 ledger by `phase17_f_verify_s1e2.py`:
 
-| Config | OOT PF | WF p5 | MC p5 | WF P(loss) | 36-mo equity | Worst month |
+| Config | OOT PF | WF p5 | MC p5 | WF P(loss) | 36-mo equity¹ | Worst month |
 |---|---|---|---|---|---|---|
-| **S1 × E2 (priority paper)** | 3.343 | 1.415 | 2.971 | 0.0% | **10,424x** | −5.68% |
-| S4 × E2 (max-safety) | 6.429 | 2.504 | 5.536 | 0.0% | 54.72x | −0.25% |
+| **S1 × E2 (priority paper)** | 3.343 | 1.415 | 2.971 | 0.0% | **10,424x¹** | −5.68% |
+| S4 × E2 (max-safety) | 6.429 | 2.504 | 5.536 | 0.0% | 54.72x¹ | −0.25% |
+
+**¹ Realism caveat (added 2026-04-26 by `phase17_g_sizing_audit.py`).**
+The 36-month equity multiples in this table chain across the full
+2023-04 → 2026-04 trade ledger, ~33 months of which are in-sample for the
+v4 classifier. They also use `pos_scale_cap = 1.5` (above CLAUDE.md's 125%
+gross-notional cap), no notional cap, and flat 0.15% friction. Under a
+tightened realism stack — OOT-only (last 3 months), `pos_scale_cap = 1.0`,
+$50k notional cap, and 0.5% slippage in breadth-gated entries — S1×E2
+compounds **1.72× over the 3-month OOT window**. Naive
+12-fold extrapolation of that rate yields ~672×; the in-sample 36-month
+sim under the same realism stack yields ~119×. Both are very far from
+10,424×. **Do not use the 10,424× number for sizing decisions.** See
+`services/python/results/phase17_g_sizing_audit.json` for the full table
+and `phase17_g_sizing_audit.py` for the methodology.
 
 **User-preferred for paper trade: S1 × E2.** Linear sign-locked Candidate-B
 sizing (`pos_scale = min(1.5 × |btc_score|, 1.5)`) + ATR-based exits
@@ -920,9 +934,11 @@ Reasoning for prioritizing S1×E2:
 - S1×E2 captures bigger TPs on high-volatility alts (where 6×ATR is far
   larger than the fixed 15%). S4 caps these by zero-sizing low-confidence
   trades.
-- Realistic 36-month equity is 190× higher under S1×E2 (10,424x vs 54.72x).
-  WF P(loss) = 0% in both, so the *path* is comparable in robustness; only
-  the *amplitude* differs.
+- Headline 36-month equity claims (10,424× vs 54.72×) are inflated — see
+  the realism caveat above. The honest forward-looking range is much
+  narrower; both configs likely sit in 30–700× over 36 months once
+  in-sample, gross-notional, capacity, and slippage are corrected.
+  Re-running `phase17_g_sizing_audit.py` for S4×E2 is open work.
 - The cost is wider drawdowns: −5.68% worst month vs −0.25% under S4. This
   is the explicit tradeoff the user accepted by picking S1×E2.
 
