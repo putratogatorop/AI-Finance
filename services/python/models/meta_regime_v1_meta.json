@@ -1,0 +1,29 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "btc_30d_return",
+    "btc_90d_return",
+    "btc_180d_return",
+    "btc_30d_realized_vol",
+    "btc_vs_sma200_pct",
+    "btc_vs_ema26_weekly_pct",
+    "btc_macd_4h_signal_spread_norm"
+  ],
+  "label": "fwd_3mo_short_only_pf_ge_1.0",
+  "C": 0.1,
+  "train_auc": 0.8625,
+  "oot_auc": null,
+  "train_n_windows": 26,
+  "oot_n_windows": 1,
+  "feature_coefficients_scaled": {
+    "btc_30d_return": -0.24002535977304854,
+    "btc_90d_return": 0.03295066929336397,
+    "btc_180d_return": 0.35109544046646846,
+    "btc_30d_realized_vol": -0.11411253549691533,
+    "btc_vs_sma200_pct": 0.13063809269175305,
+    "btc_vs_ema26_weekly_pct": 0.07737766223724629,
+    "btc_macd_4h_signal_spread_norm": 0.16488774583681687
+  },
+  "window_months": 3,
+  "snapshot_date": "2026-04-01"
+}
