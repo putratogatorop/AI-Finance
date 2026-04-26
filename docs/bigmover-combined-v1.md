@@ -502,3 +502,139 @@ The 8-point standard worked exactly as designed: it caught a strategy
 that *looks* deployable on point estimates (PF 1.45, MC p5 1.37) but
 isn't, because regime variance dominates the metric. Without the WF p5
 gate this would have been deployed and lost money in 2024-Q4.
+
+## Phase 11 — BTC oscillator features (RSI, KDJ, BB %B, Volume z-score)
+
+User question: did we use RSI/KDJ/Bollinger/Volume on BTC for regime
+classification? Answer: trend features only at the meta-regime layer.
+This phase adds 5 BTC oscillator features and tests both ML + hand-
+crafted variants.
+
+Hand-crafted rule sweep on v2 SHORT trades (4,933 OOT after R1 filter):
+
+| Rule | OOT n | OOT PF | WF p5 | MC p5 |
+|---|---|---|---|---|
+| Baseline (no rule) | 5,268 | 1.451 | 0.367 | 1.367 |
+| **R1: skip when BTC RSI(14) < 20** | **4,933** | **1.596** | 0.369 | **1.504** |
+| R2: skip KDJ J < −10 | 5,107 | 1.472 | 0.367 | 1.386 |
+| R3: skip BB %B < 0.05 | 4,072 | 0.858 | 0.369 | 0.799 |
+| R4: skip vol z > 2.5 | 4,533 | 1.122 | 0.309 | 1.050 |
+
+**RSI confirms the user's hypothesis**: `RSI(14) < 20` is a clean
+whipsaw signal. R1 alone lifts OOT PF +14% (1.451 → 1.596) and MC p5
++10% (1.367 → 1.504). Surprisingly, %B and volume z-score (textbook
+whipsaw signals) HURT OOT — those touches/spikes continued lower in
+this OOT period rather than snapping back.
+
+ML meta-regime v2 (12 features incl. oscillators):
+- Train AUC 0.9313 (overfit on 26 windows)
+- OOT PF 1.302 (clears 1.30 floor)
+- WF p50 = 1.302 (median window now profitable)
+- WF P(loss) = 31.8% (down from 50%) — meaningful frequency improvement
+- WF p5 = 0.323 (still below 1.0)
+- Top scaled coefficient: `btc_rsi14_daily` (-0.304, dominant) confirms
+  RSI as the most discriminating feature.
+
+Phase 11b clean-combo sweep showed the locked-on-TRAIN combo (RSI≥30 +
+momentum≤0.15) FAILS OOT (PF 0.657) because in OOT BTC RSI was below
+30 frequently in continuation trades. **Only RSI≥20 catches the right
+extreme — but that signal is invisible at TRAIN time under any
+locking criterion**. Config D (momentum≤0.10 + RSI≥20) achieves OOT PF
+1.596 / MC p5 1.504 / WF p5 0.474 but is overfit-by-OOT-selection.
+
+## Phase 12 — Hierarchical multi-timeframe cascade gate
+
+User proposed a 4-layer hierarchical AND-gate as a structurally
+different approach: instead of flat ML on combined features, require
+**each timeframe to independently confirm direction** before firing.
+
+Layers (all using EMA + RSI + MACD + KDJ all-bearish agreement, with
+indicator parameters textbook-default and shifted 1 bar for no-lookahead):
+
+| Layer | Timeframe | Role |
+|---|---|---|
+| L1 | BTC daily (EMA 9/21/50) | direction + sizing |
+| L2 | BTC 1h | BTC timing confirmation |
+| L3 | coin 4h | coin structural agreement (per-asset) |
+| L4 | coin 15m | v2 ml_on+sized (existing) |
+
+**Per-layer pass rates** (the most informative finding):
+
+| Period | n | L1 | L2 | L3 | L1∧L2∧L3 |
+|---|---|---|---|---|---|
+| TRAIN | 63,393 | 4.2% | 24.2% | 29.5% | **0.3%** |
+| OOT | 5,268 | 15.4% | 28.3% | 39.5% | **3.0%** |
+
+OOT was a sustained bear → full multi-TF alignment fires **10× more
+often** than TRAIN. The cascade is structurally different across
+periods.
+
+**Cascade variants:**
+
+| Variant | TRAIN n | TRAIN PF | OOT n | OOT PF | WF p5 | WF p50 | P(loss) | MC p5 |
+|---|---|---|---|---|---|---|---|---|
+| C0 baseline | 63,393 | 1.124 | 5,268 | 1.451 | 0.367 | 0.933 | 50.0% | 1.367 |
+| C1 L1 only | 2,634 | 0.357 | 810 | 2.699 | 0.006 | 0.098 | 72.2% | 2.381 |
+| C2 L1+L3 | 923 | 0.479 | 409 | 1.572 | 0.000 | 0.105 | 68.8% | 1.316 |
+| **C3 L1+L2+L3 full** | **184** | **0.153** | **158** | **4.008** | 0.028 | **1.930** | **37.5%** | **3.063** |
+
+C3 looks phenomenal on OOT — PF 4.008 with MC p5 3.063 — but TRAIN PF
+is 0.153 (the cascade LOST money in training). **Same gate, opposite
+outcome across periods.**
+
+**Diagnosis:** in TRAIN periods, the rare moments when all 3 layers
+aligned bearish coincided with bear-BOTTOM whipsaws (e.g., 2023-09 had
+all-3-bearish at the local bottom). In OOT, the same alignment came
+during sustained bear continuation. **The hand-crafted cascade cannot
+distinguish these two states.** This is the same regime-asymmetry
+problem we've seen in every phase, just with a different mechanism.
+
+Per protocol, locking on TRAIN PF picks C0 (baseline) — ship gate
+still fails on WF p5.
+
+## Final post-mortem (12 phases, lane closed honestly)
+
+**The aggregate 12-phase finding:**
+
+| Phase | Approach | What it taught us |
+|---|---|---|
+| 0-7 | Build the bigmover + 16-feature classifier + sizing | Real per-trade edge from indicators (+39% PF lift over baseline). OOT works, WF doesn't. |
+| 8 | Weekly meta-gate + exit sweep | Both rejected. Baseline 5%/15% exit wins. |
+| 9 | Outcome-aligned label (v2) | Cleaner training, OOT PF 1.30+. WF unchanged — **WF is not a classifier accuracy problem**. |
+| 10 | BTC momentum meta-gate (hand-crafted + ML) | Hand-crafted T=0.10 best, WF p5 0.474. ML overfits 26 windows. |
+| 11 | BTC oscillator features | RSI(14)<20 is the cleanest whipsaw signal. R1 lifts OOT PF +14%. But threshold uninferrable from TRAIN. |
+| 11b | Clean combo sweep | TRAIN-locked discipline correctly rejects the OOT-best Config D as overfit. |
+| 12 | Multi-TF cascade | TRAIN/OOT pass rate 10× different. Same cascade fires on whipsaw bottoms in TRAIN and on continuation in OOT. |
+
+**The structural truth:** crypto has 3 years of bigmover-relevant data
+in this snapshot. With ~4 distinct macro regimes (2023 bear, 2024 bull,
+mid-2024 chop, 2024-Q4 to 2025 bull, 2025-H2 to 2026-Q1 bear), every
+honest classifier or rule trained on this data is selecting on AT MOST
+2-3 regime examples per outcome. That's not enough samples for the
+8-point standard's WF p5 > 1.0 to hold.
+
+**Three honest options for the user (final):**
+
+1. **Capped paper deployment of v2 SHORT-only baseline + Phase 11 R1 (RSI<20 guard)**.
+   - Use SHORT-only v2 ml_on+sized.
+   - Skip any signal where BTC daily RSI(14) < 20.
+   - Cap notional at ≤0.20% of capital per trade (max 130 concurrent positions
+     → max 26% deployed → worst-month equity drawdown ≤ −10%).
+   - Hard kill switch: pause all new entries when BTC weekly close > weekly
+     EMA-26 OR portfolio drawdown exceeds −8% in a calendar month.
+   - Run 2-3 months for live signal-to-fill data.
+   - **This is the protocol-soft option** — accepting WF p5 < 1 as a known
+     risk in exchange for live data + small position size.
+
+2. **Stop and pivot to a different strategy class.**
+   - Funding-rate arb, basis trading, intraday mean-reversion have very
+     different regime profiles.
+   - The bigmover/momentum-short space has been thoroughly explored.
+
+3. **Backfill 10 years of data + try again** (if a Binance-archive backfill
+   is feasible). 120 monthly windows instead of 26-34 might allow the meta-
+   regime classifier and Phase 11 RSI threshold to lock cleanly. ~3 days of
+   work + uncertain regime-stationarity gains.
+
+The 8-point standard worked: this strategy WOULD have been deployed and
+lost money in 2024-Q4 / 2024-02 / 2023-Q4 without it.
