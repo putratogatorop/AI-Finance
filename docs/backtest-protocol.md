@@ -92,6 +92,34 @@ contract for any predictor-gated backtest:
 Example: `services/python/scripts/backtest_strat_b_with_predictor.py` +
 `docs/continuation-predictor-v1.md`.
 
+## Continuous sizing artifact contract
+
+When a backtest applies *continuous position sizing* on top of a binary
+predictor (e.g., a BTC-trend-score sizing curve), the additional rules:
+
+7. **Sizing function lives in `src/ml/<area>/sizing.py`.** It must be a
+   pure function of `(scalar_score, direction, config_object)` that
+   returns a non-negative scalar. Sign-locked by direction: when the score
+   contradicts the trade direction, the function MUST return 0.0 (the
+   "no trades against the trend" rule).
+8. **Sizing config is JSON-serialized to `services/python/models/<name>_v<N>_sizing.json`**
+   alongside the predictor's `joblib`. Anyone running the backtest must
+   load this exact config — backtest scripts MUST NOT silently use defaults
+   that diverge from the saved JSON.
+9. **The simulator multiplies `pnl_pct` by the sizing scale** to produce
+   `sized_pnl`. Trades with `pos_scale == 0` are excluded from "trades"
+   counts in metrics (they didn't happen). Walk-forward and Monte Carlo
+   computations use the `sized_pnl` column.
+10. **Sensitivity sweep over sizing knobs is reportable, never selectable.**
+    Knobs (cap, floor, slope, intercept) are locked at training time. A
+    Phase-6-style sensitivity run perturbs them ±20% to confirm the ship
+    gate verdict is robust, but the final shipping config must be the
+    pre-locked one — no post-hoc OOT tuning.
+
+Example: `services/python/scripts/backtest_bigmover_combined_with_ml.py` +
+`docs/bigmover-combined-v1.md` (continuous sign-locked sizing on the BTC
+trend score).
+
 ## Related files
 
 - Template: `services/python/scripts/backtest_template.py`
