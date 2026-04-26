@@ -638,3 +638,343 @@ honest classifier or rule trained on this data is selecting on AT MOST
 
 The 8-point standard worked: this strategy WOULD have been deployed and
 lost money in 2024-Q4 / 2024-02 / 2023-Q4 without it.
+
+---
+
+## Phase 13 — regime-aware early exit (failed)
+
+Tested closing positions when BTC's regime flipped at 1h, daily, or 15m
+timeframes (full EMA + RSI + MACD + KDJ agreement). Every variant degraded
+OOT PF: too noisy without a confirmation filter, fires on routine bounces
+rather than the violent rallies that kill SHORT positions.
+
+| Variant | OOT PF | Δ vs baseline |
+|---|---|---|
+| baseline | 1.451 | — |
+| 1h regime exit | 1.227 | −15% |
+| daily regime exit | 1.342 | −8% |
+| 15m regime exit | 1.208 | −17% |
+
+Lesson: regime flips alone are too noisy. Need to confirm with price action.
+
+## Phase 14 — strict entry + rapid-rally exit (V2 won)
+
+Took two ideas forward:
+- **V1**: only enter when BTC daily AND BTC 1h are both ALL-BEARISH.
+- **V2**: only exit when BTC regime flips AND BTC moved > +3% in last 24h.
+- **V3**: V1 entry + V2 exit.
+
+| Variant | OOT PF | WF p5 |
+|---|---|---|
+| V0 baseline | 1.451 | 0.474 |
+| V1 strict entry | 1.422 | 0.553 |
+| **V2 rapid-rally exit** | **1.668** | **0.553** |
+| V3 strict entry + V2 exit | 1.622 | 0.589 |
+
+**V2 won.** Adding the +3% confirmation filter to the regime-exit signal cut
+the noise that broke Phase 13. WF p5 still 0.553 (below 1.0 ship floor).
+
+## Phase 15 — ATR-normalized detector vs volume-only (D1 won, step-change)
+
+User hypothesis: the bigmover-volume detector triggers on raw % moves +
+raw volume spikes, which mean different things on BTC (low vol, 5% drop
+is rare) vs alts (high vol, 5% drop is daily noise). An ATR-normalized
+trigger should adapt to each asset's volatility regime.
+
+Three detectors compared head-to-head, same SHORT-side exits + sign-locked
+sizing + Phase-14 V2 rapid-rally exit:
+
+| Detector | Trigger | OOT PF | WF p5 | MC p5 |
+|---|---|---|---|---|
+| D0 bigmover-volume (current) | vol≥3 & drop≥5% | 1.882 | 0.565 | 1.729 |
+| **D1 ATR-drop + vol** | drop≥2.5×ATR & vol≥2 & red bar | **2.064** | **0.605** | **1.947** |
+| D2 ATR-scaled drop | drop≥3×ATR/close & vol≥2 | 1.766 | 0.533 | 1.657 |
+
+**D1 won.** ATR normalization is a step-change improvement: WF p5 is the
+highest measured across 15 phases. Two surprise findings:
+1. **The v2 ML classifier was destructive on D1 trades.** Removing it
+   improved every metric (TRAIN PF +42%, OOT PF +13%, WF p5 +83%) — the
+   v2 classifier was trained on the D0 distribution, not D1.
+2. ATR-normalization validates the user's intuition that fixed-% thresholds
+   don't translate across volatility regimes.
+
+WF p5 0.605 — still below 1.0 ship floor, but the highest ever.
+
+## Phase 16 — D1 extensions (LONG-side, fresh classifier, RSI<20 meta-gate)
+
+Three follow-ups on the D1 winner.
+
+### Phase 16.1 — D1 LONG side (FAILED, ship SHORT-only)
+
+Mirror detector for LONG: `(close - rolling_low_96) / ATR_14 ≥ 2.5 AND vol ≥ 2 AND green bar`,
+LONG sign-locked sizing, LONG-mirror rapid-bear exit (BTC daily ALL-BULLISH AND
+BTC 24h return < −3%).
+
+| Detector | TRAIN PF | OOT PF | WF p5 | MC p5 |
+|---|---|---|---|---|
+| D0L bigmover-volume LONG | 1.265 | 0.608 | 0.600 | 0.542 |
+| D1L ATR-rise LONG | 1.215 | 0.596 | 0.542 | 0.555 |
+
+**LONG side stays broken.** ATR normalization didn't fix the long-side
+asymmetry — drops continue, rallies don't. Crypto's structural "drops are
+bigger than rallies" property holds even under ATR scaling. Strategy stays
+SHORT-only.
+
+### Phase 16.2 — Fresh classifier on D1 SHORT trades (CLASSIFIER HELPS)
+
+The Phase-15 finding that the v2 classifier hurt was a *distribution* issue,
+not a *model* issue: it was trained on D0 trades. A fresh LR (C=1.0,
+class_weight='balanced', 5-fold purged time-CV @ purge=192, outcome label,
+same 16-feature set) on the D1 distribution produces a real, honest edge.
+
+Training metrics:
+- 74,925 D1 SHORT trades, outcome positive rate 42.0%
+- CV AUCs: 0.538 / 0.569 / 0.532 / 0.551
+- Full-train AUC 0.567, OOT AUC 0.562, **gap 0.005** (no overfit)
+- Threshold locked at TRAIN q0.5 = 0.4991
+
+Backtest with classifier gate:
+
+| Variant | OOT n | OOT PF | WF p5 | WF P(loss) | MC p5 |
+|---|---|---|---|---|---|
+| D1 raw (Phase 15) | 5,467 | 2.067 | 0.605 | 26.5% | 1.945 |
+| **D1 + v3 LR classifier** | **2,336** | **2.607** | **0.719** | **11.8%** | **2.371** |
+
+**Classifier kept.** Every metric improves: OOT PF +26%, WF p5 +19%,
+WF P(loss) cut from 26.5% → 11.8%, MC p5 +22%. The lesson from Phases 9
+and 10 still holds (more model complexity overfits tiny windows), but a
+distribution-matched LR is genuinely informative.
+
+### Phase 16.3 — Stack RSI<20 meta-gate (REDUNDANT, dropped)
+
+Phase 11 R1 found skipping BTC daily RSI(14) < 20 lifted Phase-9 v2 OOT
+PF +14%. Tested whether it stacks on D1.
+
+| Variant | OOT n | OOT PF | WF p5 |
+|---|---|---|---|
+| D1 raw | 5,467 | 2.067 | 0.605 |
+| D1 + RSI≥20 | 5,176 | 2.053 | 0.605 |
+| D1 + v3 classifier | 2,336 | 2.607 | 0.719 |
+| D1 + classifier + RSI≥20 | 2,294 | 2.577 | 0.719 |
+
+**Dropped.** The RSI<20 gate excludes only 1.1% of D1 trades — the sign-locked
+BTC trend score sizing already filters the same regime. No incremental edge.
+
+---
+
+## Phase 16 — final locked configuration
+
+The strategy that ships at the end of this research lane:
+
+| Component | Specification |
+|---|---|
+| Direction | **SHORT-only** (LONG side broken under both detectors) |
+| Detector | **D1**: `(rolling_high_96 − close) / ATR_14 ≥ 2.5 AND volume / vol_MA_20 ≥ 2.0 AND close < open` |
+| Cooldown | 96 bars (24h) per asset |
+| Sizing | Sign-locked Candidate-B BTC trend score (4h MACD spread, K=0.005255), only enter when score < 0; pos_scale = min(1.5 · |score|, 1.5) |
+| Classifier | LR (C=1.0, class_weight='balanced', 16-feature set + is_short, outcome label, threshold = TRAIN q0.5 = 0.4991) — `services/python/models/d1_short_v3.joblib` |
+| Entry exit — SL | −5% from entry |
+| Entry exit — TP | +15% from entry |
+| Entry exit — timeout | 672 bars (7 days) |
+| Entry exit — friction | 0.0015 |
+| Rapid-rally exit | Close at next bar if `(NOT BTC daily ALL-BEARISH)` AND `BTC 24h return > +3%` |
+| Snapshot reproducibility | `data/snapshots/candles_15m_2026-04-01.parquet` |
+
+**Locked ship-gate metrics (D1 + v3 classifier + rapid-rally exit, SHORT-only):**
+
+| Metric | Value | Ship floor | Pass? |
+|---|---|---|---|
+| OOT PF | 2.607 | ≥ 1.30 | **PASS** |
+| OOT n | 2,336 | ≥ 200 | **PASS** |
+| MC bootstrap p5 | 2.371 | > 1.00 | **PASS** |
+| WF p5 (34 folds) | 0.719 | > 1.00 | **FAIL** |
+| WF P(loss) | 11.8% | — | (cut from 26.5% raw) |
+
+WF p5 still does not clear 1.0. The 8-point standard's WF gate continues
+to block hard live deployment. But this is the highest WF p5 measured
+across 16 phases, with WF P(loss) under 12%.
+
+## Updated deployment recommendation
+
+The final option, given Phase 16's improvements:
+
+**Capped-paper deployment of D1 + v3 classifier + rapid-rally exit (SHORT-only).**
+
+- Use the locked configuration table above. No live LONG positions.
+- Cap notional at ≤ **0.30 % of capital per trade** (up from 0.20% — the
+  P(loss) cut from 26.5% → 11.8% justifies the modest size lift).
+- Max concurrent positions: 100 (max 30% deployed). Worst-month historical
+  drawdown projection ≈ −7% to −10% on the WF p5 fold.
+- Hard kill switches:
+  - Pause new entries when BTC weekly close > weekly EMA-26 (bull market).
+  - Pause new entries when portfolio drawdown exceeds −8% in a calendar month.
+  - Pause new entries when classifier OOT AUC drops below 0.53 over a
+    rolling 60-trade window (model decay early-warning).
+- Log every signal-to-fill latency, slippage, and gate-rejection reason for
+  3 months before any sizing increase.
+- Re-train v3 classifier monthly on the rolling 24-month window.
+
+**Promotion criteria** (from paper to live):
+- 60+ consecutive trading days of paper data.
+- Paper PF ≥ 1.50 net of fees AND drawdown ≤ −12%.
+- WF p5 on the rolling 24-month window ≥ 0.80 (not yet 1.0 — explicit
+  acceptance of below-floor risk in exchange for the live edge).
+- User explicit go-decision; never auto-promoted.
+
+If WF p5 fails to lift toward 1.0 over 6 months of paper data, revert to
+options 2 or 3 in the prior section (pivot strategy class or backfill
+deeper history).
+
+---
+
+## Phase 17 — Four-strand parallel search (3 nulls + 1 stacking win)
+
+After Phase 16 locked, four orthogonal research strands ran in parallel to
+push WF p5 past the 1.0 ship floor: detector composition (17.A), 3-layer
+regime cascade (17.B), indicator feature expansion (17.C), and sizing × exit
+sweep (17.D). Each strand used pre-committed thresholds; the synthesis
+stacked the winners.
+
+| Strand | Decision rule outcome | Verdict |
+|---|---|---|
+| 17.A — D1e detector (D1 + universe-down-breadth ≥ 0.6) | TRAIN PF max + OOT n ≥ 200 + OOT PF ≥ 2.064 + WF p5 ≥ 0.605 — all PASS | **WIN (modest)**: OOT PF +16% (2.064 → 2.399), WF p5 +0.015 |
+| 17.B — 3-layer regime cascade (BTC 4h × coin daily × coin 1h) | C2 (L1 hard veto) passes by +0.001 WF p5 (only 0.16% of D1 entries are in BTC 4h all-bullish, already filtered by sign-locked sizing). C1/C3 actively hurt | **DROP — null** |
+| 17.C — Bollinger %B/width/squeeze + ATR%/EMA21-cross-EMA50 added to feature set | OOT AUC drops 0.5623 → 0.5535; OOT PF regresses 2.607 → 2.432; every new feature has *negative* OOT-AUC delta when included | **DROP — null** (16-feature LR is saturated) |
+| 17.D — 4×4 sizing × exit grid | S4 classifier-weighted sizing × E2 ATR-based exits: OOT PF 2.607 → 5.422, **WF p5 0.719 → 2.474 (clears 1.0 ship floor for the first time)** | **WIN (large)** |
+
+### Phase 17.E — synthesis (D1e + retrained v4 classifier + S4 × E2)
+
+Per the project memory rule "retrain classifier when detector changes," 17.A's
+D1e detector required retraining. The synthesis run re-detected D1e SHORT
+trades (62,298 vs D1's 74,907), trained a v4 LR (TRAIN AUC 0.5644, OOT AUC
+0.5374, gap 0.027), then applied S4 sizing × E2 ATR exits.
+
+**Every ship-gate metric improved over 17.D-alone:**
+
+| Metric | Phase 16 locked | 17.D alone | **17.E stacked** | Floor | Pass? |
+|---|---|---|---|---|---|
+| OOT PF | 2.607 | 5.422 | **6.429** | ≥ 1.30 | **PASS** |
+| OOT n | 2,336 | 2,298 | 1,945 | ≥ 200 | **PASS** |
+| MC bootstrap p5 | 2.371 | 4.550 | **5.536** | > 1.00 | **PASS** |
+| WF p5 (34 folds) | 0.719 | 2.474 | **2.504** | > 1.00 | **PASS** |
+| WF P(loss) | 11.8% | — | **0.0%** | — | (zero of 34 folds had PF<1) |
+
+**This is the first configuration in 17 phases of research to clear all four
+8-point ship gates.** Reproducibility: PASS, byte-identical between two runs.
+
+## Phase 17 — final locked configuration
+
+| Component | Specification |
+|---|---|
+| Direction | **SHORT-only** (Phase 16.1 confirmed long is structurally broken) |
+| Detector | **D1e**: `(rolling_high_96 − close) / ATR_14 ≥ 2.5 AND volume / vol_MA_20 ≥ 2.0 AND close < open AND universe_down_breadth_4h ≥ 0.6` |
+| Breadth panel | Same construction as `services/python/src/ml/bigmover_combined/features.py:_ret_4h_panel`; lookback = 16 bars (4h) |
+| Cooldown | 96 bars (24h) per asset |
+| Sign-lock filter | Enter only when Candidate-B BTC trend score < 0 |
+| Sizing (S4) | `pos_scale = clip(3.0 × (classifier_score − 0.5), 0.0, 1.5)` — zero-sizes low-confidence trades |
+| Classifier | v4 LR (C=1.0, class_weight='balanced', 16-feature set + is_short, outcome label, threshold = TRAIN q0.5 = 0.5010) — `services/python/models/d1e_short_v4.joblib` |
+| Entry exit — SL (E2) | `entry_price + 2 × ATR_14_at_entry` (volatility-adapted) |
+| Entry exit — TP (E2) | `entry_price − 6 × ATR_14_at_entry` (3:1 R:R preserved) |
+| Entry exit — timeout | 672 bars (7 days) |
+| Entry exit — friction | 0.0015 |
+| Rapid-rally exit | Close at next bar if `(NOT BTC daily ALL-BEARISH)` AND `BTC 24h return > +3%` |
+| Snapshot reproducibility | `data/snapshots/candles_15m_2026-04-01.parquet` |
+
+### Realistic equity simulation (5%/5x sizing, max 5 concurrent, compounding)
+
+| Metric | Phase 16 (D1+v3+S1×E1) | **Phase 17.E (D1e+v4+S4×E2)** |
+|---|---|---|
+| Final equity (36 months) | 75.99x | 54.72x |
+| Best month | +74.5% | +35.3% |
+| Worst month | −11.6% | **−0.3%** |
+| Median month | +8.21% | +10.53% |
+| **Negative months (out of 36)** | 7 | **1** |
+| Realistic monthly P(loss) | 19.4% | **2.8%** |
+| Signals dropped on 5-concurrent cap | 94.7% | 85.1% |
+
+Phase 17.E has lower headline equity but **dramatically smoother risk**:
+worst month went from −11.6% to −0.3%, and only 1 of 36 months printed a
+loss (vs 7). The strategy gives up tail upside (smaller best months) for
+tail safety. This is the correct tradeoff under CLAUDE.md's risk regime
+(5% SL, MAX_CONCURRENT 5).
+
+### Updated deployment recommendation (capped paper, then live)
+
+The strategy now passes the 8-point ship gate. Two ship-passing configs are
+on the table, picked from the Phase 17.D 4×4 grid and re-verified on the
+D1e+v4 ledger by `phase17_f_verify_s1e2.py`:
+
+| Config | OOT PF | WF p5 | MC p5 | WF P(loss) | 36-mo equity | Worst month |
+|---|---|---|---|---|---|---|
+| **S1 × E2 (priority paper)** | 3.343 | 1.415 | 2.971 | 0.0% | **10,424x** | −5.68% |
+| S4 × E2 (max-safety) | 6.429 | 2.504 | 5.536 | 0.0% | 54.72x | −0.25% |
+
+**User-preferred for paper trade: S1 × E2.** Linear sign-locked Candidate-B
+sizing (`pos_scale = min(1.5 × |btc_score|, 1.5)`) + ATR-based exits
+(SL = entry + 2 × ATR_14, TP = entry − 6 × ATR_14). Higher headline PnL,
+slightly looser ship-gate metrics, more exposure to live slippage.
+
+Reasoning for prioritizing S1×E2:
+- Both configs pass the 8-point ship gate cleanly. There is no protocol
+  reason to prefer one.
+- S1×E2 captures bigger TPs on high-volatility alts (where 6×ATR is far
+  larger than the fixed 15%). S4 caps these by zero-sizing low-confidence
+  trades.
+- Realistic 36-month equity is 190× higher under S1×E2 (10,424x vs 54.72x).
+  WF P(loss) = 0% in both, so the *path* is comparable in robustness; only
+  the *amplitude* differs.
+- The cost is wider drawdowns: −5.68% worst month vs −0.25% under S4. This
+  is the explicit tradeoff the user accepted by picking S1×E2.
+
+**Recommendation:**
+
+1. **30-day capped paper** at 0.30% notional per trade under S1×E2.
+   - Max 5 concurrent positions per CLAUDE.md.
+   - Hard kill switches:
+     - Pause new entries when BTC weekly close > weekly EMA-26 (bull market).
+     - Pause new entries when portfolio drawdown exceeds −7% in a calendar
+       month (tighter than the S4 case because S1 has wider tails).
+     - Pause new entries when v4 OOT AUC drops below 0.52 over a rolling
+       60-trade window (model decay early-warning).
+   - Log every signal-to-fill latency, slippage, and gate-rejection reason.
+2. **If paper looks good** (PF ≥ 2.0 net of slippage, drawdown ≤ −7%, no
+   kill-switch trip): move to small live with 1.0% notional per trade for
+   another 60 days.
+3. **Promotion to full size** (5% × 5x = 25% notional per CLAUDE.md):
+   60 days of small-live with paper-tracking error < 30%, and explicit
+   user go-decision.
+
+**S4 × E2 stays in the codebase as the conservative fallback config**: if
+S1×E2 paper trade prints worst-month worse than −10%, switch to S4×E2 (same
+code path, just change the sizing variable).
+
+**Re-train v4 monthly** on the rolling 24-month window. Re-build the
+breadth panel monthly (universe membership changes).
+
+### Risk caveats (must read before any live deploy)
+
+1. **OOT is still only 3 months.** The headline 6.4 OOT PF is on 1,945
+   trades over 2026-01 to 2026-04. The walk-forward distribution is what
+   matters for confidence; WF p5 = 2.504 is robust but the snapshot
+   captures only ~3 distinct macro regimes. Live data over 6+ months of
+   different conditions is the real test.
+2. **Multiple-comparisons risk.** Phase 17.D explored a 16-cell grid; we
+   picked the winning cell. Phase 17.E stacked 17.A's winner. Each level
+   of selection compounds overfit risk. The pre-committed thresholds and
+   reproducibility checks help but don't eliminate it.
+3. **v4 has a wider TRAIN-OOT AUC gap (0.027) than v3 (0.005)**, hinting at
+   more overfit on the smaller, breadth-filtered D1e distribution. Monitor
+   live AUC closely; the 0.52 kill-switch is tight on purpose.
+4. **The breadth gate fires only when many alts are co-falling.** This is
+   exactly when liquidity gets worst. Real slippage in those moments may
+   exceed the modeled 0.0015 friction by 2-5×, which would compress PF.
+5. **CLAUDE.md sizing was kept fixed.** Do not increase 5% per trade × 5x
+   leverage in pursuit of the 54.72x backtest equity number; that figure
+   is *with* CLAUDE.md sizing, not on top of it.
+
+Artifacts:
+- Scripts: `services/python/scripts/phase17_{a,b,c,d,e}_*.py`,
+  `phase17_perf_breakdown.py`.
+- Models: `services/python/models/d1e_short_v4.{joblib,_meta.json,_sizing.json}`.
+- Trade ledgers: `services/python/data/d1e_short_trades{,_with_features}.csv`.
+- Results JSON: `services/python/results/phase17_{a,b,c,d,e}_*.json`.
