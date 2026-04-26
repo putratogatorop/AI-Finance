@@ -1,0 +1,46 @@
+{
+  "model": "logistic_regression",
+  "feature_names": [
+    "vol_ratio",
+    "price_drop_pct",
+    "price_rise_pct",
+    "accel_atr_norm",
+    "bars_since_high32",
+    "price_vs_ema9_pct",
+    "price_vs_ema50_pct",
+    "rsi14_delta_1bar",
+    "rsi14_delta_4bar",
+    "macd_signal_spread_norm",
+    "macd_hist_momentum",
+    "kdj_j",
+    "kdj_k",
+    "btc_trend_score",
+    "btc_realized_vol_24h",
+    "concurrent_dir_breadth",
+    "is_short"
+  ],
+  "label_kind": "outcome",
+  "label_thresholds": {
+    "kind": "outcome_pnl_positive",
+    "exit_sl": 0.05,
+    "exit_tp": 0.15,
+    "exit_timeout": 672,
+    "exit_friction": 0.0015
+  },
+  "detector": "D1_atr_drop_2.5_vol_2 (Phase 15 winner)",
+  "lr_C": 1.0,
+  "purge_bars": 192,
+  "cv_aucs": [
+    0.538423106379128,
+    0.5693583665980293,
+    0.5314772409314561,
+    0.5507503705533596
+  ],
+  "train_auc": 0.5668868309169867,
+  "oot_auc": 0.5622950907486344,
+  "threshold_train_q50": 0.49906737974689,
+  "trained_on_n": 69440,
+  "trained_on_pos_rate": 0.4142569124423963,
+  "snapshot_date": "2026-04-01",
+  "trades_csv": "/Users/putratogatorop/Desktop/AI Finance/services/python/data/d1_short_trades.csv"
+}
