@@ -338,7 +338,7 @@ Result file: `services/python/results/backtest_bigmover_combined_with_ml_*/phase
 Both post-hoc tweaks tested and rejected. The Phase-5 result
 **(SHORT-only OOT PF 1.525, WF p5 0.363, ship-gate FAIL)** is the
 ceiling for this configuration. Further improvement requires upstream
-changes:
+changes (which Phase 9 + Phase 10 then attempted):
 
 - **Different label** (currently 0.10 fwd_target / 0.04 drawdown /
   192 bars) — try 0.06/0.02/96 to capture faster bigmover continuations
@@ -355,3 +355,150 @@ changes:
   with strict btc_weekly cross exit could collect live signal-to-
   execution data while limiting downside. **Decision is the user's,
   not engineering's**, and is explicitly out of scope for this lane.
+
+## Phase 9 — outcome-aligned label (v2)
+
+**Hypothesis:** the v1 label (10%-drop-in-48h-before-4%-rally) is a
+*proxy* for actual trade outcome under SL=5%/TP=15%/timeout=672. Train-
+ing the classifier on the actual outcome (`label = pnl_pct > 0`)
+instead of the proxy should yield a better filter.
+
+**Result:** directionally yes, structurally no.
+
+| Metric | v1 (proxy label) | v2 (outcome label) | Δ |
+|---|---|---|---|
+| Train AUC | 0.5765 | 0.5376 | −3.9pp (v1 was overfitting its label) |
+| OOT AUC | 0.5948 | 0.5957 | ≈ same (no generalization gain) |
+| **Combined OOT PF** | 1.098 | **1.314** | **+19.7%** ← clears 1.30 floor |
+| OOT WR | 30.9% | 35.8% | +4.9pp |
+| OOT avg pnl | +0.25% | +0.76% | 3× |
+| MC bootstrap p5 | 1.033 | **1.247** | +21% (more robust) |
+| **WF p5** | 0.743 | **0.553** | −26% (no progress on the killer gate) |
+
+Per-direction OOT (v2):
+
+| Combo | n | PF | WR |
+|---|---|---|---|
+| **SHORT total** | **5,268** | **1.451** | 39.7% |
+| baseline_short | 2,063 | 1.447 | 40.6% |
+| price_accel_short | 1,654 | 1.434 | 39.6% |
+| multi_bar_short | 1,551 | 1.476 | 38.6% |
+| LONG total | 1,169 | 0.582 | 18.1% (still broken) |
+
+SHORT-only walk-forward (v2): p5 = 0.367 (vs v1's 0.363 — no progress).
+Confirms: WF fail is **not a classifier-accuracy problem**.
+
+Run: `services/python/results/backtest_bigmover_combined_v2_outcome_0582b799_20260426T033736Z/`
+Artifacts: `services/python/models/bigmover_combined_v2_outcome.{joblib,_meta.json,_sizing.json}`
+
+## Phase 10 — meta-regime gate
+
+**Hypothesis:** stack a separate "is the next 3 months short-friendly?"
+gate on top of v2. Gate is computed at entry time using BTC-only
+features (no future leak) and blocks signals during predicted-bull
+quarters.
+
+### 10.1 Hand-crafted BTC-momentum gate (`btc_90d_return ≤ T`)
+
+Sweep on 64,187 v2 SHORT entries:
+
+| Threshold | TRAIN PF | OOT PF | WF p5 | MC p5 |
+|---|---|---|---|---|
+| T=+0.00 | 1.358 | 1.451 | 0.139 | 1.367 |
+| T=+0.05 | 1.293 | 1.451 | 0.261 | 1.367 |
+| **T=+0.10** | 1.344 | 1.451 | **0.474** ← best WF | 1.367 |
+| T=+0.15 (TRAIN-locked) | 1.376 | 1.451 | 0.259 | 1.367 |
+| T=+0.20 | 1.321 | 1.451 | 0.197 | 1.367 |
+| T=+0.30 | 1.247 | 1.451 | 0.065 | 1.367 |
+
+OOT n + OOT PF + MC p5 unchanged across thresholds — BTC's 90d return
+was ≤ 0% throughout the OOT window (Jan-Apr 2026), so the gate is a
+no-op on OOT. Only TRAIN-period folds change.
+
+Catastrophic-month rescue at T=+0.15:
+- 2023-11/12, 2024-02 KILLED entirely (n→0)
+- 2024-11 (post-election rally): 2,625 → 728 trades, PF 0.099 → 0.211
+- 2023-10: 1,558 → 946, PF 0.292 → 0.521
+- 2025-08: 1,407 → 816, PF 0.256 → 0.480
+- 2024-05: barely affected, PF actually worsens 0.269 → 0.185
+- 2023-09: untouched (BTC wasn't rallying — bear-bottom whipsaw is a
+  *different* failure mode the momentum gate cannot detect)
+
+Even the WF-best threshold T=+0.10 only lifts WF p5 to 0.474 — far
+below 1.0 ship floor.
+
+### 10.2 ML meta-regime classifier — REJECTED
+
+7-feature LR (`btc_30d_return`, `btc_90d_return`, `btc_180d_return`,
+`btc_30d_realized_vol`, `btc_vs_sma200_pct`, `btc_vs_ema26_weekly_pct`,
+`btc_macd_4h_signal_spread_norm`) trained on 26 monthly window-level
+samples to predict "next 3 months SHORT-only PF ≥ 1.0".
+
+- Train AUC: 0.8625 (suspiciously high — overfitting tiny sample)
+- OOT AUC: NaN (only 1 OOT window)
+- WF p5 with this gate: 0.400 (**worse** than the simple T=+0.10 rule)
+- OOT n with this gate: 0 (model predicted negative class for the
+  entire OOT period → blocks all OOT trades → automatic ship-gate FAIL)
+
+Top features (scaled coefficients): `btc_180d_return` (+0.351),
+`btc_30d_return` (−0.240), `btc_macd_4h_signal_spread_norm` (+0.165).
+
+Run: `services/python/results/.../phase10_meta_regime_classifier.json`
+Artifacts: `services/python/models/meta_regime_v1.{joblib,_meta.json}`
+
+### Phase 10 conclusion + final post-mortem
+
+**The walk-forward fail is STRUCTURAL, not addressable via post-hoc gating.**
+
+The 8 catastrophic months span at least two distinct regimes:
+- **BTC bull rallies** (2023-Q4, 2024-Q1, 2024-Q4 to $100K, 2025-Q3) —
+  any momentum-based gate can flag these.
+- **BTC bear-bottom whipsaw** (2023-09 with PF 0.30 at WR 25%) — this
+  is the OPPOSITE momentum state yet equally bad for shorts. No linear
+  gate can identify both groups as "skip" without also blocking the
+  modest-bear regime where the strategy actually works (PF 1.217 per
+  Phase 6 bucket analysis).
+
+The 7-feature ML classifier on 26 windows could not separate these
+either. The data simply doesn't admit a low-complexity quarter-level
+gate that both rescues catastrophic months AND preserves the regimes
+where the strategy works.
+
+**Final ship-gate verdict:**
+
+| Gate | v1 SHORT-only | v2 SHORT-only | v2 + 10.1 best | v2 + 10.2 ML |
+|---|---|---|---|---|
+| OOT PF ≥ 1.30 | ✅ 1.525 | ✅ 1.451 | ✅ 1.451 | ❌ NaN (n=0) |
+| OOT n ≥ 200 | ✅ 3,112 | ✅ 5,268 | ✅ 5,268 | ❌ 0 |
+| MC p5 > 1.0 | ✅ 1.420 | ✅ 1.247 (combined) | ✅ 1.367 | ❌ NaN |
+| WF p5 > 1.0 | ❌ 0.363 | ❌ 0.367 | ❌ 0.474 | ❌ 0.400 |
+| **Overall** | **DO NOT SHIP** | **DO NOT SHIP** | **DO NOT SHIP** | **DO NOT SHIP** |
+
+**Lane closed.** No post-hoc tweak available in the design space we've
+explored gets us past the WF p5 ship gate. The strategy has real edge
+in some regimes (OOT PF 1.45, MC p5 1.37) but is too regime-dependent
+to deploy unsupervised per the 8-point standard.
+
+### Honest options going forward
+
+1. **Capped paper deployment of SHORT-only v2 as-is**, with hard
+   guardrails: $1k-$10k notional, manual kill-switch when BTC weekly
+   crosses above weekly EMA-26, daily PnL monitoring. The OOT PF 1.451
+   with MC p5 1.367 is real money in the right regime; the question is
+   how much downside you're willing to take in the wrong regime in
+   exchange for live data. **Decision is the user's, not engineering's.**
+2. **Long-side rebuild** with a different exit (TP=8%/SL=4%/timeout=192)
+   and retrained classifier — different problem, ~3 days of work, no
+   guarantee of success.
+3. **OI + funding-rate features upstream** — would lift the trade-level
+   classifier's OOT AUC from 0.595 to (estimated) 0.62+. Won't fix WF p5
+   alone but might make a *combined* meta-regime + trade-level system
+   reach the gate. ~2 days of work.
+4. **Fundamentally different strategy class** — abandon bigmover, try
+   intraday mean-reversion, basis-trading, funding-arb, or other
+   strategies with different regime profiles. New research lane.
+
+The 8-point standard worked exactly as designed: it caught a strategy
+that *looks* deployable on point estimates (PF 1.45, MC p5 1.37) but
+isn't, because regime variance dominates the metric. Without the WF p5
+gate this would have been deployed and lost money in 2024-Q4.
