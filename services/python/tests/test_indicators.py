@@ -88,14 +88,17 @@ def test_kdj_hand_computed_reference():
 
     out = kdj(highs, lows, closes, n=n, k_smooth=3, d_smooth=3)
     # At bar n-1 (i=8), RSV = 100 * (9 - 0.5) / (9.5 - 0.5) = 100 * 8.5 / 9.0
-    expected_rsv_last = 100.0 * 8.5 / 9.0
+    100.0 * 8.5 / 9.0
     # K, D require k_smooth and d_smooth more bars — should still be NaN here.
     assert np.isnan(out["k"].iloc[-1])
     assert np.isnan(out["d"].iloc[-1])
     assert np.isnan(out["j"].iloc[-1])
 
     # Add 4 more bars to reach K and D warmup.
-    closes2 = pd.concat([closes, pd.Series([float(n + 1 + i) for i in range(4)])], ignore_index=True)
+    closes2 = pd.concat(
+        [closes, pd.Series([float(n + 1 + i) for i in range(4)])],
+        ignore_index=True,
+    )
     highs2 = closes2 + 0.5
     lows2 = closes2 - 0.5
     out2 = kdj(highs2, lows2, closes2, n=n, k_smooth=3, d_smooth=3)
@@ -167,31 +170,39 @@ def test_no_lookahead_macd():
     c_corrupt.iloc[100:] = c.iloc[100:].to_numpy()[perm]
     out_corrupt = macd(c_corrupt)
     for col in ("macd", "signal", "histogram"):
-        pd.testing.assert_series_equal(out_full[col].iloc[:100], out_corrupt[col].iloc[:100], check_names=False)
+        pd.testing.assert_series_equal(
+            out_full[col].iloc[:100], out_corrupt[col].iloc[:100], check_names=False,
+        )
 
 
 def test_no_lookahead_kdj():
-    h, l, c = _ohlc_path()
-    out_full = kdj(h, l, c)
+    h, lo, c = _ohlc_path()
+    out_full = kdj(h, lo, c)
     rng = np.random.default_rng(7)
     perm = rng.permutation(len(c) - 100)
-    h_c = h.copy(); l_c = l.copy(); c_c = c.copy()
+    h_c = h.copy()
+    l_c = lo.copy()
+    c_c = c.copy()
     h_c.iloc[100:] = h.iloc[100:].to_numpy()[perm]
-    l_c.iloc[100:] = l.iloc[100:].to_numpy()[perm]
+    l_c.iloc[100:] = lo.iloc[100:].to_numpy()[perm]
     c_c.iloc[100:] = c.iloc[100:].to_numpy()[perm]
     out_corrupt = kdj(h_c, l_c, c_c)
     for col in ("k", "d", "j"):
-        pd.testing.assert_series_equal(out_full[col].iloc[:100], out_corrupt[col].iloc[:100], check_names=False)
+        pd.testing.assert_series_equal(
+            out_full[col].iloc[:100], out_corrupt[col].iloc[:100], check_names=False,
+        )
 
 
 def test_no_lookahead_atr():
-    h, l, c = _ohlc_path()
-    out_full = atr(h, l, c, 14)
+    h, lo, c = _ohlc_path()
+    out_full = atr(h, lo, c, 14)
     rng = np.random.default_rng(7)
     perm = rng.permutation(len(c) - 100)
-    h_c = h.copy(); l_c = l.copy(); c_c = c.copy()
+    h_c = h.copy()
+    l_c = lo.copy()
+    c_c = c.copy()
     h_c.iloc[100:] = h.iloc[100:].to_numpy()[perm]
-    l_c.iloc[100:] = l.iloc[100:].to_numpy()[perm]
+    l_c.iloc[100:] = lo.iloc[100:].to_numpy()[perm]
     c_c.iloc[100:] = c.iloc[100:].to_numpy()[perm]
     out_corrupt = atr(h_c, l_c, c_c, 14)
     pd.testing.assert_series_equal(out_full.iloc[:100], out_corrupt.iloc[:100], check_names=False)

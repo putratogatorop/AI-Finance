@@ -1,9 +1,8 @@
 """Direction-aware continuation label tests."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import numpy as np
 import pandas as pd
 
 from src.ml.bigmover_combined.labels import filter_labelable, make_label
@@ -17,10 +16,10 @@ def _candles(symbol: str, start: datetime, highs: list[float], lows: list[float]
         {
             "asset": [symbol] * n,
             "timestamp": pd.to_datetime(ts, utc=True),
-            "open": [(h + l) / 2 for h, l in zip(highs, lows)],
+            "open": [(h + lo) / 2 for h, lo in zip(highs, lows, strict=False)],
             "high": highs,
             "low": lows,
-            "close": [(h + l) / 2 for h, l in zip(highs, lows)],
+            "close": [(h + lo) / 2 for h, lo in zip(highs, lows, strict=False)],
             "volume": [1.0] * n,
         }
     )
@@ -42,7 +41,7 @@ def _trade(direction: str, entry_time: datetime, entry_price: float = 100.0) -> 
 
 def test_short_continuation_drop_to_target():
     """Short at 100; price grinds down to 88 (>=10% drop) without a >4% rally → label=1."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     pre_h = [101.0] * 5
     pre_l = [99.0] * 5
     # 30 post bars: stay below 104 (no >4% rally), reach 88 by bar 25.
@@ -55,7 +54,7 @@ def test_short_continuation_drop_to_target():
 
 
 def test_short_drawup_first_kills_label():
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     pre_h, pre_l = [100.5] * 5, [99.5] * 5
     # post bar 0 spikes high to 105 (>4% rally) before any drop.
     post_h = [105.0] + [101.0] * 19
@@ -71,7 +70,7 @@ def test_short_drawup_first_kills_label():
 
 def test_long_continuation_rally_to_target():
     """Long at 100; price grinds up to 112 without a >4% drop → label=1."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     pre_h, pre_l = [101.0] * 5, [99.0] * 5
     post_h = [101.0 + i * 0.5 for i in range(30)]
     post_l = [99.0] * 30  # never drops >4% from 100
@@ -83,7 +82,7 @@ def test_long_continuation_rally_to_target():
 
 def test_long_drawdown_first_kills_label():
     """Long at 100; price drops to 95 (>4%) before reaching +10% → label=0."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     pre_h, pre_l = [100.5] * 5, [99.5] * 5
     post_h = [101.0] + [115.0] * 19
     post_l = [95.0] + [99.0] * 19  # bar 0 dips to 95 (>4% drop) before any rally
@@ -98,7 +97,7 @@ def test_long_drawdown_first_kills_label():
 
 def test_label_stalled_in_window():
     """Neither target nor cap reached within max_bars → label=0 (stalled)."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     pre_h, pre_l = [100.5] * 5, [99.5] * 5
     post_h = [101.0] * 200
     post_l = [99.0] * 200
@@ -109,14 +108,14 @@ def test_label_stalled_in_window():
 
 
 def test_unknown_direction_yields_minus_one():
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     candles = _candles("TESTUSDT", start, [101] * 200, [99] * 200)
     trades = _trade("flat", candles["timestamp"].iloc[5], 100.0)
     assert make_label(trades, candles).iloc[0] == -1
 
 
 def test_unknown_symbol_yields_minus_one():
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     candles = _candles("OTHERUSDT", start, [101] * 200, [99] * 200)
     trades = pd.DataFrame(
         {
@@ -130,7 +129,7 @@ def test_unknown_symbol_yields_minus_one():
 
 
 def test_label_ran_out_of_bars():
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     candles = _candles("TESTUSDT", start, [101] * 20, [99] * 20)
     entry_ts = candles["timestamp"].iloc[-1]  # last bar = no future bars
     trades = _trade("short", entry_ts, 100.0)
@@ -138,7 +137,7 @@ def test_label_ran_out_of_bars():
 
 
 def test_filter_labelable_drops_too_late_entries():
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     snapshot_end = start + timedelta(hours=24)
     trades = pd.DataFrame(
         {

@@ -162,7 +162,7 @@ def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetVie
     )
     o = sub["open"].to_numpy(dtype=float)
     h = sub["high"].to_numpy(dtype=float)
-    l = sub["low"].to_numpy(dtype=float)
+    lo = sub["low"].to_numpy(dtype=float)
     c = sub["close"].to_numpy(dtype=float)
     v = sub["volume"].to_numpy(dtype=float)
     vol_ma20 = pd.Series(v).rolling(VOL_MA_PERIOD, min_periods=VOL_MA_PERIOD).mean().to_numpy()
@@ -170,10 +170,10 @@ def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetVie
         pd.Series(h).rolling(PRICE_LOOKBACK_96, min_periods=PRICE_LOOKBACK_96).max().to_numpy()
     )
     rolling_low96 = (
-        pd.Series(l).rolling(PRICE_LOOKBACK_96, min_periods=PRICE_LOOKBACK_96).min().to_numpy()
+        pd.Series(lo).rolling(PRICE_LOOKBACK_96, min_periods=PRICE_LOOKBACK_96).min().to_numpy()
     )
     bars_since_high32 = _argmax_in_window_to_offset(h, PRICE_LOOKBACK_32)
-    atr14 = _atr(pd.Series(h), pd.Series(l), pd.Series(c), ATR_LOOKBACK).to_numpy()
+    atr14 = _atr(pd.Series(h), pd.Series(lo), pd.Series(c), ATR_LOOKBACK).to_numpy()
     ema9 = _ema(pd.Series(c), EMA_FAST).to_numpy()
     ema50 = _ema(pd.Series(c), EMA_SLOW).to_numpy()
     rsi14 = _rsi(pd.Series(c), RSI_PERIOD).to_numpy()
@@ -182,11 +182,11 @@ def _build_asset_view(sub: pd.DataFrame, ts_col: str = "timestamp") -> _AssetVie
     macd_sig_arr = md["signal"].to_numpy()
     macd_hist_arr = md["histogram"].to_numpy()
     k = _kdj(
-        pd.Series(h), pd.Series(l), pd.Series(c),
+        pd.Series(h), pd.Series(lo), pd.Series(c),
         n=KDJ_N, k_smooth=KDJ_K_SMOOTH, d_smooth=KDJ_D_SMOOTH,
     )
     return _AssetView(
-        ts=ts, open=o, high=h, low=l, close=c, volume=v,
+        ts=ts, open=o, high=h, low=lo, close=c, volume=v,
         vol_ma20=vol_ma20,
         rolling_high96=rolling_high96, rolling_low96=rolling_low96,
         bars_since_high32=bars_since_high32, atr14=atr14,
@@ -312,14 +312,22 @@ class FeatureContext:
         if i < 0:
             return out
 
-        c, h, l, _o, vol = view.close, view.high, view.low, view.open, view.volume
+        c, _h, _l, _o, vol = view.close, view.high, view.low, view.open, view.volume
 
         # --- bigmover internals ----------------------------------------------
         if i < len(view.vol_ma20) and view.vol_ma20[i] > 0:
             out["vol_ratio"] = float(vol[i] / view.vol_ma20[i])
-        if i < len(view.rolling_high96) and np.isfinite(view.rolling_high96[i]) and view.rolling_high96[i] > 0:
+        if (
+            i < len(view.rolling_high96)
+            and np.isfinite(view.rolling_high96[i])
+            and view.rolling_high96[i] > 0
+        ):
             out["price_drop_pct"] = float((view.rolling_high96[i] - c[i]) / view.rolling_high96[i])
-        if i < len(view.rolling_low96) and np.isfinite(view.rolling_low96[i]) and view.rolling_low96[i] > 0:
+        if (
+            i < len(view.rolling_low96)
+            and np.isfinite(view.rolling_low96[i])
+            and view.rolling_low96[i] > 0
+        ):
             out["price_rise_pct"] = float((c[i] - view.rolling_low96[i]) / view.rolling_low96[i])
         if i >= 1 and i < len(view.atr14) and np.isfinite(view.atr14[i]) and view.atr14[i] > 0:
             out["accel_atr_norm"] = float((c[i] - c[i - 1]) / view.atr14[i])
@@ -333,9 +341,15 @@ class FeatureContext:
             out["price_vs_ema50_pct"] = float((c[i] - view.ema50[i]) / c[i])
 
         # --- RSI deltas (1-bar = 15m, 4-bar = 1h) ----------------------------
-        if i >= 1 and i < len(view.rsi14) and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 1]):
+        if (
+            i >= 1 and i < len(view.rsi14)
+            and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 1])
+        ):
             out["rsi14_delta_1bar"] = float(view.rsi14[i] - view.rsi14[i - 1])
-        if i >= 4 and i < len(view.rsi14) and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 4]):
+        if (
+            i >= 4 and i < len(view.rsi14)
+            and np.isfinite(view.rsi14[i]) and np.isfinite(view.rsi14[i - 4])
+        ):
             out["rsi14_delta_4bar"] = float(view.rsi14[i] - view.rsi14[i - 4])
 
         # --- MACD (signal-spread normalised + 2-bar histogram momentum) ------
@@ -346,7 +360,10 @@ class FeatureContext:
             out["macd_signal_spread_norm"] = float(
                 (view.macd[i] - view.macd_sig[i]) / c[i]
             )
-        if i >= 2 and i < len(view.macd_hist) and np.isfinite(view.macd_hist[i]) and np.isfinite(view.macd_hist[i - 2]):
+        if (
+            i >= 2 and i < len(view.macd_hist)
+            and np.isfinite(view.macd_hist[i]) and np.isfinite(view.macd_hist[i - 2])
+        ):
             out["macd_hist_momentum"] = float(view.macd_hist[i] - view.macd_hist[i - 2])
 
         # --- KDJ raw levels --------------------------------------------------

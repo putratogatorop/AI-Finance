@@ -12,18 +12,17 @@ Three guarantees we must hold:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.ml.continuation.features import FEATURE_NAMES, FeatureContext
 
 
 def _synthetic_candles(n_assets: int = 6, n_bars: int = 500) -> pd.DataFrame:
     """Make a synthetic candle frame with `n_assets` (one is BTCUSDT)."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     rng = np.random.default_rng(42)
     rows = []
     syms = ["BTCUSDT"] + [f"COIN{i}USDT" for i in range(n_assets - 1)]
@@ -140,7 +139,9 @@ def test_warm_features_are_finite():
         "vol_decile",
         "concurrent_down_breadth",
     ]:
-        assert np.isfinite(feats[name]), f"{name} should be finite past warmup but got {feats[name]}"
+        assert np.isfinite(feats[name]), (
+            f"{name} should be finite past warmup but got {feats[name]}"
+        )
 
 
 # ---- 3. Sample-shape sanity --------------------------------------------------

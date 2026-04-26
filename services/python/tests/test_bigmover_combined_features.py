@@ -10,7 +10,7 @@ Three guarantees we hold (mirrors continuation predictor's tests):
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,7 @@ from src.ml.bigmover_combined.features import FEATURE_NAMES, FeatureContext
 
 def _synthetic_candles(n_assets: int = 6, n_bars: int = 800) -> pd.DataFrame:
     """Synthetic candle frame with `n_assets` symbols (one is BTCUSDT)."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     rng = np.random.default_rng(42)
     rows = []
     syms = ["BTCUSDT"] + [f"COIN{i}USDT" for i in range(n_assets - 1)]
@@ -99,7 +99,9 @@ def test_warm_features_are_finite_for_indicators():
         "kdj_j", "kdj_k",
         "concurrent_dir_breadth",
     ]:
-        assert np.isfinite(feats[name]), f"{name} should be finite past warmup but got {feats[name]}"
+        assert np.isfinite(feats[name]), (
+            f"{name} should be finite past warmup but got {feats[name]}"
+        )
 
 
 def test_warmup_yields_nan_for_indicators():
@@ -139,11 +141,11 @@ def test_concurrent_dir_breadth_flips_with_direction():
     s = ctx.build_for(
         {"symbol": "COIN0USDT", "entry_time": entry_ts, "direction": "short"}
     )["concurrent_dir_breadth"]
-    l = ctx.build_for(
+    long_b = ctx.build_for(
         {"symbol": "COIN0USDT", "entry_time": entry_ts, "direction": "long"}
     )["concurrent_dir_breadth"]
-    if np.isfinite(s) and np.isfinite(l):
-        assert 0.99 <= s + l <= 1.01
+    if np.isfinite(s) and np.isfinite(long_b):
+        assert 0.99 <= s + long_b <= 1.01
 
 
 def test_unknown_symbol_yields_all_nan_for_features():

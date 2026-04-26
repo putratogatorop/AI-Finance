@@ -62,7 +62,8 @@ def make_continuation_label(
     if len(trades_df) == 0:
         return pd.Series([], dtype=np.int8)
 
-    # Index candles for fast per-symbol lookups: dict[symbol] -> (ts ndarray, high ndarray, low ndarray)
+    # Index candles for fast per-symbol lookups:
+    #   dict[symbol] -> (ts ndarray, high ndarray, low ndarray)
     by_symbol: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     cs = candles.sort_values([candle_symbol_col, candle_ts_col])
     for sym, sub in cs.groupby(candle_symbol_col, sort=False):

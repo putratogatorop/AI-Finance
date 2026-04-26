@@ -11,7 +11,7 @@ and asserts that the new module returns the same boolean / dict.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -112,7 +112,7 @@ def _legacy_long_compute_regime(candle_cache, btc_df):
 
 # Fixtures -------------------------------------------------------------------
 
-START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, tzinfo=UTC)
 N_BARS_25D = _bars_for_n_days(25)
 
 

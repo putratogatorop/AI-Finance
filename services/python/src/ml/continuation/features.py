@@ -125,18 +125,21 @@ def _build_asset_view(sub: pd.DataFrame) -> _AssetView:
     )
     o = sub["open"].to_numpy(dtype=float)
     h = sub["high"].to_numpy(dtype=float)
-    l = sub["low"].to_numpy(dtype=float)
+    lo = sub["low"].to_numpy(dtype=float)
     c = sub["close"].to_numpy(dtype=float)
     v = sub["volume"].to_numpy(dtype=float)
 
-    atr14 = _atr_array(h, l, c, ATR_LOOKBACK)
+    atr14 = _atr_array(h, lo, c, ATR_LOOKBACK)
 
     rolling_high32 = (
-        pd.Series(h).rolling(ROLLING_HIGH_LOOKBACK, min_periods=ROLLING_HIGH_LOOKBACK).max().to_numpy()
+        pd.Series(h)
+        .rolling(ROLLING_HIGH_LOOKBACK, min_periods=ROLLING_HIGH_LOOKBACK)
+        .max()
+        .to_numpy()
     )
     rolling_argmax32 = _argmax_in_window(h, ROLLING_HIGH_LOOKBACK)
 
-    range_ = h - l
+    range_ = h - lo
     range_safe = np.where(range_ > 0, range_, np.nan)
     body_ratio_per_bar = np.abs(c - o) / range_safe  # NaN where range=0
     body_to_range_8 = (
@@ -157,7 +160,7 @@ def _build_asset_view(sub: pd.DataFrame) -> _AssetView:
     )
 
     return _AssetView(
-        ts=ts, open=o, high=h, low=l, close=c, volume=v,
+        ts=ts, open=o, high=h, low=lo, close=c, volume=v,
         atr14=atr14,
         rolling_high32=rolling_high32,
         rolling_argmax32=rolling_argmax32,
@@ -205,7 +208,9 @@ class FeatureContext:
         # Shift by 1 so the 4h EMA at any 15m timestamp uses only the most recent
         # CLOSED 4h bar. This is critical for no-lookahead at the boundary.
         above_4h = (btc_4h > ema).shift(1)
-        self._btc_above_ema50_4h_15m = above_4h.reindex(btc_15m_close.index, method="ffill").fillna(False)
+        self._btc_above_ema50_4h_15m = (
+            above_4h.reindex(btc_15m_close.index, method="ffill").fillna(False)
+        )
 
         # BTC 4h pct change at every 15m bar: ((btc[t]/btc[t-16]) - 1).
         self._btc_4h_ret_15m = btc_15m_close.pct_change(BTC_4H_LOOKBACK)
@@ -241,7 +246,9 @@ class FeatureContext:
                     mask[sym] = True
             vol_panel = vol_panel.where(mask)
         pct_rank = vol_panel.rank(axis=1, pct=True)
-        self._vol_decile_panel = (pct_rank * 10.0 - 1e-9).clip(lower=0).apply(np.floor).astype("Int64")
+        self._vol_decile_panel = (
+            (pct_rank * 10.0 - 1e-9).clip(lower=0).apply(np.floor).astype("Int64")
+        )
 
         # Concurrent 4h-down breadth: fraction of universe with 4h-ret < -2% at each timestamp.
         ret_4h_panel = (
@@ -259,7 +266,9 @@ class FeatureContext:
         is_down = (ret_4h_panel < BREADTH_4H_DOWN_THRESH)
         n_listed = ret_4h_panel.notna().sum(axis=1)
         n_down = is_down.sum(axis=1)
-        self._breadth_4h_panel = (n_down / n_listed.where(n_listed > 0)).rename("concurrent_down_breadth")
+        self._breadth_4h_panel = (
+            (n_down / n_listed.where(n_listed > 0)).rename("concurrent_down_breadth")
+        )
 
     # --- per-asset cache -----------------------------------------------------
 
@@ -283,7 +292,11 @@ class FeatureContext:
         caller is expected to drop rows with any NaN before training.
         """
         sym = trade_row["symbol"]
-        entry_ts = pd.Timestamp(trade_row["entry_time"]).tz_convert("UTC") if pd.Timestamp(trade_row["entry_time"]).tzinfo else pd.Timestamp(trade_row["entry_time"], tz="UTC")
+        raw_ts = pd.Timestamp(trade_row["entry_time"])
+        entry_ts = (
+            raw_ts.tz_convert("UTC") if raw_ts.tzinfo
+            else pd.Timestamp(trade_row["entry_time"], tz="UTC")
+        )
         return self._build_for_typed(sym, entry_ts)
 
     def _build_for_typed(self, symbol: str, entry_ts: pd.Timestamp) -> dict[str, float]:
@@ -311,8 +324,8 @@ class FeatureContext:
 
         # prior_bar_wick_ratio at i-1
         if i >= 1:
-            h, l, c = view.high[i - 1], view.low[i - 1], view.close[i - 1]
-            rng = h - l
+            h, lo, c = view.high[i - 1], view.low[i - 1], view.close[i - 1]
+            rng = h - lo
             if rng > 0:
                 out["prior_bar_wick_ratio"] = float((h - c) / rng)
 
