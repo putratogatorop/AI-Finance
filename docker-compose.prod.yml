@@ -60,6 +60,12 @@ services:
     <<: *python-service
     command: ["python", "scripts/live_scanner_long_v2.py"]
 
+  # D1e scanner (Phase 17 locked, SHORT-only) — feeds the 4 D1e×{S,E} paper
+  # accounts. Writes to scanner_signals_d1e with v4 classifier scores attached.
+  scanner-d1e:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_d1e.py"]
+
   paper:
     <<: *python-service
     command: ["python", "scripts/paper_executor.py"]
