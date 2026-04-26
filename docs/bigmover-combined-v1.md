@@ -269,4 +269,89 @@ diff results/backtest_bigmover_combined_with_ml_*<earlier_ts>*/metrics.json \
 
 # 6. Sensitivity + transfer:
 python scripts/sensitivity_bigmover_combined_v1.py
+
+# 7. Phase 8 follow-ups (re-aggregation only, no candle re-load):
+python scripts/phase8_weekly_metagate_eval.py    # weekly meta-gate eval
+python scripts/phase8_exit_sweep.py              # 7-config exit sweep
 ```
+
+## Phase 8 — post-hoc tweaks: weekly meta-gate + exit-rule sweep
+
+After the v1 ship-gate FAIL on walk-forward p5, the user asked to test
+two post-hoc fixes to lift WF p5 above 1.0 without retraining:
+(1) a coarser **weekly-trend meta-gate**, and (2) an **exit-rule sweep**
+including trailing stops and asymmetric SL/TP.
+
+Both knobs were exhausted; **neither rescues the strategy**.
+
+### Phase 8.1 — Weekly meta-gate REJECTED
+
+Hypothesis: blocking SHORT signals when BTC weekly close ≥ weekly
+EMA-26 will kill catastrophic months (2023-Q4 rally, 2024-04 pump,
+2024-11 post-election rally, 2025-08 mid-cycle rally).
+
+Result: gate works on 7/8 catastrophic months — but at huge cost.
+
+| Cell | No gate | + Weekly gate |
+|---|---|---|
+| train trades | 38,883 | 7,291 (5× cut) |
+| **train PF** | **1.114** | **1.000** (no edge) |
+| oot trades | 3,112 | 3,112 (BTC was weekly-bear all of OOT) |
+| oot PF | 1.525 | 1.525 (no-op on OOT) |
+| **WF p5** | **0.363** | **0.268** (worse) |
+
+Diagnosis matches the Phase-6 by-bucket finding: "strong bear" PF 1.117
+< "bear" PF 1.217. The weekly-below-EMA gate selects the strongest-bear
+regime — which is exactly NOT where this strategy works best. Gate
+rejected.
+
+Result file: `services/python/results/backtest_bigmover_combined_with_ml_*/phase8_weekly_metagate.json`
+
+### Phase 8.2 — Exit-rule sweep: baseline IS the winner
+
+Re-simulated all 41,995 short ml_on+sized entries under 7 alternative
+exit configs. Locked on TRAIN total_pnl (NOT OOT — protocol-mandated).
+
+| Config | TRAIN PF | OOT PF | OOT avg | Verdict |
+|---|---|---|---|---|
+| **E0 baseline 5%/15%/672** | **1.114** | **1.525** | **+1.345%** | ✅ **WINNER** |
+| E1 tight TP 5%/8%/672 | 1.050 | 1.381 | +0.839% | underperforms |
+| E2 symmetric 5%/5%/672 | 1.009 | 1.270 | +0.498% | gives up upside |
+| E3 fast timeout 5%/15%/96 | 0.967 | 1.314 | +0.589% | exits winners early |
+| E4 trail 3% (no fixed TP) | 0.982 | 0.749 | −0.277% | catastrophic on OOT |
+| E5 trail 2% activated | 0.998 | 1.114 | +0.111% | mild loss |
+| E6 tighter SL 3%/8%/672 | 1.043 | 1.264 | +0.461% | underperforms |
+
+The **current 5%/15%/672 exit is genuinely best on both train and OOT**
+— no overfit risk, no better config available in this grid.
+
+Notable: trail-stop variants (E4, E5) underperform on OOT despite their
+intuitive appeal. The leakfix backtest's reported PF 3.15 with trail-3%
+came from a different setup (no ML filter, capped capital, different
+regime mix); that result does NOT transfer to the ML-gated single-trade
+pool tested here.
+
+Result file: `services/python/results/backtest_bigmover_combined_with_ml_*/phase8_exit_sweep.json`
+
+### Phase 8 conclusion
+
+Both post-hoc tweaks tested and rejected. The Phase-5 result
+**(SHORT-only OOT PF 1.525, WF p5 0.363, ship-gate FAIL)** is the
+ceiling for this configuration. Further improvement requires upstream
+changes:
+
+- **Different label** (currently 0.10 fwd_target / 0.04 drawdown /
+  192 bars) — try 0.06/0.02/96 to capture faster bigmover continuations
+  the current label misses.
+- **More features** — OI + funding-rate from the local Postgres
+  (`backfill_funding_rates.py`, `backfill_contract_stats.py` already
+  scaffolded). Most promising single uplift opportunity per the
+  Phase-3 specialist team's footnote.
+- **Long-side rebuild** — long machinery is fundamentally broken under
+  SL=5%/TP=15%. Different label + retrain on long-only trades is a
+  separate, ~3-day workstream.
+- **Capped paper deployment of SHORT-only as-is** — the OOT PF 1.525
+  with MC bootstrap p5 1.420 is real. A $1k-$10k notional paper run
+  with strict btc_weekly cross exit could collect live signal-to-
+  execution data while limiting downside. **Decision is the user's,
+  not engineering's**, and is explicitly out of scope for this lane.
