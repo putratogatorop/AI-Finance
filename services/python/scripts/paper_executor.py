@@ -15,10 +15,11 @@ Usage: python scripts/paper_executor.py
 
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -35,7 +36,7 @@ DRY_RUN = True  # NEVER change to False in this file — real trading is a separ
 assert DRY_RUN, "paper_executor.py must always be DRY_RUN"
 
 # ── Config ───────────────────────────────────────────────────────────
-import os
+
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:MySQL100%25@localhost:5432/market")
 GATEIO_BASE = "https://api.gateio.ws/api/v4"
 
@@ -164,12 +165,30 @@ V8_TIMEOUT_BARS = 672  # 7 days at 15m
 V8_STARTING_EQUITY_USD = float(os.environ.get("V8_STARTING_EQUITY_USD", "200"))
 
 V8_ACCOUNTS: list[dict] = [
-    # macd_pullback_short_e2 — Week 8 PRIMARY SHORT
-    # Detector: daily MACD bear + 4h MACD cross-down after ≥2 above-signal bars
-    # Exit E2: 2× ATR SL / 6× ATR TP
+    # macd_pullback_short_e2 — Week 8 PRIMARY SHORT (wf_p5 2.10, holdout PF 4.29)
     {"strategy": "v8_macd_pullback_short_e2",
      "signal_table": "scanner_signals_macd_pullback_short",
      "direction": "short", "exit": "e2", "enabled": True},
+    # macd_early_trend_short_e2 — FRESH bear only, ≤10d since bear-flip (wf_p5 2.05)
+    {"strategy": "v8_macd_early_trend_short_e2",
+     "signal_table": "scanner_signals_macd_early_trend_short",
+     "direction": "short", "exit": "e2", "enabled": True},
+    # macd_pullback_long_e2 — symmetric long mirror, daily MACD bull + 4h cross-up (wf_p5 1.10)
+    {"strategy": "v8_macd_pullback_long_e2",
+     "signal_table": "scanner_signals_macd_pullback_long",
+     "direction": "long", "exit": "e2", "enabled": True},
+    # rsi_recovery_long_e2 — daily RSI(14) oversold recovery, de-correlated (wf_p5 1.81)
+    {"strategy": "v8_rsi_recovery_long_e2",
+     "signal_table": "scanner_signals_rsi_recovery_long",
+     "direction": "long", "exit": "e2", "enabled": True},
+]
+
+# Map each v8 signal table to its strategy_group for fetch_recent_signals.
+V8_SCANNER_TABLES = [
+    {"table": "scanner_signals_macd_pullback_short", "strategy_group": "v8_macd_pullback_short"},
+    {"table": "scanner_signals_macd_early_trend_short", "strategy_group": "v8_macd_early_trend_short"},  # noqa: E501
+    {"table": "scanner_signals_macd_pullback_long", "strategy_group": "v8_macd_pullback_long"},
+    {"table": "scanner_signals_rsi_recovery_long", "strategy_group": "v8_rsi_recovery_long"},
 ]
 
 
@@ -399,7 +418,8 @@ def ensure_paper_table(engine):
             ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS peak_pnl_pct FLOAT DEFAULT 0.0
         """))
         conn.execute(text(
-            "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_source_table_source_id_key"
+            "ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS "
+            "paper_trades_source_table_source_id_key"
         ))
         # Bigmover: add strategy discriminator. Default existing rows to legacy v2.
         conn.execute(text(
@@ -543,30 +563,34 @@ def fetch_recent_signals(engine) -> list[Signal]:
                 cls_kept=bool(r[8]) if r[8] is not None else None,
             ))
 
-        # v8 signals — table may not exist if scanner hasn't deployed yet.
-        try:
-            v8_rows = conn.execute(text("""
-                SELECT id, symbol, direction, signal_time, entry_price,
-                       atr14_at_entry, btc_score
-                FROM scanner_signals_macd_pullback_short
-                WHERE status = 'active'
-                  AND signal_time >= NOW() - INTERVAL '48 hours'
-                ORDER BY signal_time
-            """)).fetchall()
-        except Exception:
-            v8_rows = []
-        for r in v8_rows:
-            signals.append(Signal(
-                source_table="scanner_signals_macd_pullback_short",
-                source_id=r[0], symbol=r[1], direction=r[2],
-                ml_prob=1.0,  # sentinel — v8 has no classifier
-                signal_time=r[3], entry_price=float(r[4]),
-                regime_allowed=None,
-                signal_type="v8",
-                strategy_group="v8_macd_pullback_short",
-                atr14_at_entry=float(r[5]) if r[5] is not None else None,
-                btc_score=float(r[6]) if r[6] is not None else None,
-            ))
+        # v8 signals — one query per scanner table; try/except so a missing table
+        # doesn't break the other scanners or d1e accounts.
+        for v8_tbl in V8_SCANNER_TABLES:
+            tbl_name = v8_tbl["table"]
+            strat_grp = v8_tbl["strategy_group"]
+            try:
+                v8_rows = conn.execute(text(f"""
+                    SELECT id, symbol, direction, signal_time, entry_price,
+                           atr14_at_entry, btc_score
+                    FROM {tbl_name}
+                    WHERE status = 'active'
+                      AND signal_time >= NOW() - INTERVAL '48 hours'
+                    ORDER BY signal_time
+                """)).fetchall()  # noqa: S608 — tbl_name is internal constant
+            except Exception:
+                v8_rows = []
+            for r in v8_rows:
+                signals.append(Signal(
+                    source_table=tbl_name,
+                    source_id=r[0], symbol=r[1], direction=r[2],
+                    ml_prob=1.0,  # sentinel — v8 has no classifier
+                    signal_time=r[3], entry_price=float(r[4]),
+                    regime_allowed=None,
+                    signal_type="v8",
+                    strategy_group=strat_grp,
+                    atr14_at_entry=float(r[5]) if r[5] is not None else None,
+                    btc_score=float(r[6]) if r[6] is not None else None,
+                ))
 
     return signals
 
@@ -777,24 +801,32 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict):
     # Persist the new phase if it switched
     if decision.phase != state.phase:
         state.phase = decision.phase
-        state.phase_switch_ts = datetime.now(timezone.utc)
+        state.phase_switch_ts = datetime.now(UTC)
         state.phase_switch_eq = equity
         v8_sizing.save_state(engine, state)
 
-    # Exit setup — same shape as d1e for consistency in downstream check_and_close.
+    # Exit setup — direction-aware (long: SL below entry, TP above; short: reversed).
     if account["exit"] == "e1":
-        sl_price = sig.entry_price * (1 + V8_E1_SL_PCT)
-        tp_price = sig.entry_price * (1 - V8_E1_TP_PCT)
+        if sig.direction == "short":
+            sl_price = sig.entry_price * (1 + V8_E1_SL_PCT)
+            tp_price = sig.entry_price * (1 - V8_E1_TP_PCT)
+        else:
+            sl_price = sig.entry_price * (1 - V8_E1_SL_PCT)
+            tp_price = sig.entry_price * (1 + V8_E1_TP_PCT)
     elif account["exit"] == "e2":
         atr = sig.atr14_at_entry
-        sl_price = sig.entry_price + V8_E2_ATR_SL_MULT * atr
-        tp_price = max(sig.entry_price - V8_E2_ATR_TP_MULT * atr, 0.0)
+        if sig.direction == "short":
+            sl_price = sig.entry_price + V8_E2_ATR_SL_MULT * atr
+            tp_price = max(sig.entry_price - V8_E2_ATR_TP_MULT * atr, 0.0)
+        else:
+            sl_price = max(sig.entry_price - V8_E2_ATR_SL_MULT * atr, 0.0)
+            tp_price = sig.entry_price + V8_E2_ATR_TP_MULT * atr
     else:
         return
 
     venue = venue_for_direction(sig.direction)
     logger.info(
-        f"[DRY-RUN {strategy}] SHORT {sig.symbol} phase={decision.phase} "
+        f"[DRY-RUN {strategy}] {sig.direction.upper()} {sig.symbol} phase={decision.phase} "
         f"risk={decision.risk_pct*100:.2f}% sl_dist={decision.sl_distance_pct*100:.2f}% "
         f"notional=${decision.notional_usd:.2f} ({decision.notional_pct*100:.1f}% eq) "
         f"entry=${sig.entry_price:.6f} sl=${sl_price:.6f} tp=${tp_price:.6f} "
@@ -834,10 +866,13 @@ def _btc_daily_bearish() -> bool:
     Mirrors phase17_sizing_compare._build_rapid_exit_panel logic. shift(1) so
     we use yesterday's daily indicator values (no lookahead at boundary).
     """
-    import numpy as np
     import pandas as pd
+
     from src.ml.indicators import atr as _atr  # noqa: F401
-    from src.ml.indicators import ema as _ema, kdj as _kdj, macd as _macd, rsi as _rsi
+    from src.ml.indicators import ema as _ema
+    from src.ml.indicators import kdj as _kdj
+    from src.ml.indicators import macd as _macd
+    from src.ml.indicators import rsi as _rsi
     eng = create_engine(DB_URL)
     try:
         with eng.connect() as conn:
@@ -943,14 +978,19 @@ def check_and_close_trades(engine):
                 ), {"peak": peak_pnl, "id": trade_id})
 
         # Timeout check — D1e uses 672-bar (7d) timeout, others use 192-bar (48h).
-        age_sec = (datetime.now(timezone.utc) - entry_time).total_seconds()
+        age_sec = (datetime.now(UTC) - entry_time).total_seconds()
         age_bars = age_sec / (15 * 60)
 
         exit_price = None
         exit_reason = None
 
         is_d1e = _is_d1e_strategy(strategy)
-        timeout_bars = D1E_TIMEOUT_BARS if is_d1e else MAX_BARS_HOLD
+        is_v8 = strategy.startswith("v8_")
+        timeout_bars = (
+            V8_TIMEOUT_BARS if is_v8 else
+            D1E_TIMEOUT_BARS if is_d1e else
+            MAX_BARS_HOLD
+        )
 
         # 1. Hard stop-loss (price-based, both v2/bigmover and D1e)
         if direction == "long":
@@ -960,9 +1000,16 @@ def check_and_close_trades(engine):
             if price >= sl:
                 exit_price, exit_reason = sl, "stop_loss"
 
-        if is_d1e:
-            # D1e exit stack: SL (above), then TP (price-based), then rapid-rally,
-            # then timeout. NO trail-stop — research config doesn't use it.
+        if is_v8:
+            # v8 exit: SL (price-based, above), then TP (price-based), then timeout.
+            # No trail-stop, no rapid-rally — pure ATR-based exits like d1e.
+            if exit_reason is None and tp is not None and tp > 0:
+                if direction == "short" and price <= tp:
+                    exit_price, exit_reason = tp, "take_profit"
+                elif direction == "long" and price >= tp:
+                    exit_price, exit_reason = tp, "take_profit"
+        elif is_d1e:
+            # D1e exit stack: SL (above), then TP (price-based), then rapid-rally.
             if exit_reason is None and tp is not None and tp > 0:
                 if direction == "short" and price <= tp:
                     exit_price, exit_reason = tp, "take_profit"
@@ -1004,7 +1051,7 @@ def check_and_close_trades(engine):
                     fees_usd = :f, equity_after = :eq
                 WHERE id = :id
             """), {
-                "st": status, "et": datetime.now(timezone.utc),
+                "st": status, "et": datetime.now(UTC),
                 "ep": exit_price, "er": exit_reason,
                 "pp": pnl_pct, "pu": pnl_usd, "f": fees, "eq": equity_after,
                 "id": trade_id,
@@ -1057,7 +1104,9 @@ def main():
     logger.info(f"D1e notional cap: ${D1E_NOTIONAL_CAP_USD:,.0f} per trade")
     logger.info(f"Starting equity: ${STARTING_EQUITY_USD:.2f} per account")
     logger.info(f"Kill-switch:     halt new entries if day PnL < -{MAX_DAILY_LOSS_PCT*100:.0f}%")
-    logger.info(f"Max positions:   {MAX_OPEN_POSITIONS} (legacy) / {D1E_MAX_OPEN} (D1e) per account")
+    logger.info(
+        f"Max positions:   {MAX_OPEN_POSITIONS} (legacy) / {D1E_MAX_OPEN} (D1e) per account"
+    )
     logger.info(f"Poll interval:   {POLL_INTERVAL_SEC}s")
     logger.info("=" * 60)
 

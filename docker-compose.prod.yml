@@ -66,13 +66,27 @@ services:
     <<: *python-service
     command: ["python", "scripts/live_scanner_d1e.py"]
 
-  # v8 scanner — Week 8 BALANCED stack, first detector deployed:
-  # macd_pullback_short_e2 (5/6 ship gates, wf_p5 2.102 — strongest single
-  # config in v5/v8 effort). Feeds scanner_signals_macd_pullback_short.
-  # Other v8 detectors ship in follow-up PRs after 7-14d paper validation.
+  # v8 BALANCED portfolio — 4-detector stack (wf_p5 1.486, holdout PF 1.96)
+  # All 4 detectors deployed together Day 1 so monitoring covers the full
+  # portfolio from the start. Each feeds its own scanner_signals_* table.
   scanner-v8-macd-pullback-short:
     <<: *python-service
     command: ["python", "scripts/live_scanner_macd_pullback_short.py"]
+
+  # SHORT: fresh bear ≤10d since bear-flip + 4h cross-down (wf_p5 2.054)
+  scanner-v8-macd-early-trend-short:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_macd_early_trend_short.py"]
+
+  # LONG: daily MACD bull + 4h cross-up (wf_p5 1.099, symmetric of pullback short)
+  scanner-v8-macd-pullback-long:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_macd_pullback_long.py"]
+
+  # LONG: daily RSI(14) recovery from oversold <35, regime-agnostic (wf_p5 1.812)
+  scanner-v8-rsi-recovery-long:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_rsi_recovery_long.py"]
 
   paper:
     <<: *python-service
