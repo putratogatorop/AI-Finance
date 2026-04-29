@@ -42,10 +42,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 from sqlalchemy import text
+
 
 # ── Phase configs (LOCKED — change requires backtest re-citation) ────
 @dataclass(frozen=True)
@@ -293,7 +294,7 @@ def record_close(engine, strategy_group: str, closed_pnl_pct: float,
     new_phase = determine_phase(new_equity, state.phase)
     if new_phase != state.phase:
         state.phase = new_phase
-        state.phase_switch_ts = datetime.now(timezone.utc)
+        state.phase_switch_ts = datetime.now(UTC)
         state.phase_switch_eq = new_equity
     save_state(engine, state)
     return state
