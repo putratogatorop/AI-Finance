@@ -66,6 +66,14 @@ services:
     <<: *python-service
     command: ["python", "scripts/live_scanner_d1e.py"]
 
+  # v8 scanner — Week 8 BALANCED stack, first detector deployed:
+  # macd_pullback_short_e2 (5/6 ship gates, wf_p5 2.102 — strongest single
+  # config in v5/v8 effort). Feeds scanner_signals_macd_pullback_short.
+  # Other v8 detectors ship in follow-up PRs after 7-14d paper validation.
+  scanner-v8-macd-pullback-short:
+    <<: *python-service
+    command: ["python", "scripts/live_scanner_macd_pullback_short.py"]
+
   paper:
     <<: *python-service
     command: ["python", "scripts/paper_executor.py"]

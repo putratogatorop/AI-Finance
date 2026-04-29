@@ -28,6 +28,7 @@ from sqlalchemy import create_engine, text
 sys.path.insert(0, ".")
 
 from src import db_adapters  # noqa: F401  # registers numpy→psycopg2 adapters
+from src.ml.v8 import sizing as v8_sizing  # v8 phase-switch ATR sizing module
 
 # ── HARD SAFETY ──────────────────────────────────────────────────────
 DRY_RUN = True  # NEVER change to False in this file — real trading is a separate script
@@ -142,6 +143,35 @@ D1E_RAPID_LOOKBACK_15M = 96     # 24h
 # AUC kill-switch (rolling 60-trade window per account; pause new entries below).
 D1E_AUC_KILL_THRESHOLD = 0.52
 D1E_AUC_KILL_WINDOW = 60
+
+# ── v8 BALANCED accounts (Week 8, 2026-04-29) ───────────────────────
+# Pre-registered detector portfolio with portfolio wf_p5 = 1.486 on 3y backtest
+# (run id 92373355_20260429T041931Z portfolio_v8day2). Sizing uses
+# src.ml.v8.sizing — phase-switch ATR-based concurrent-aware Kelly:
+#   PHASE 1 (eq < $10K): Kelly 0.50, ceil 3.0%, gross 100%, per-pos 25%
+#   PHASE 2 (eq ≥ $10K): Kelly 0.25, ceil 1.5%, gross 60%, per-pos 12%
+#
+# First v8 detector deployed: macd_pullback_short_e2 (strongest single config
+# in the v5/v8 effort: holdout PF 4.289, wf_p5 2.102, DSR 1.000).
+# Other v8 detectors (macd_early_trend_short, macd_pullback_long,
+# rsi_recovery_long) ship in follow-up PRs after 7-14d of paper validation.
+V8_SENTINEL_THRESHOLD = 3.0  # distinguishes v8 from v2 (0.6-0.8), bigmover (1.0), d1e (2.0)
+V8_E1_SL_PCT = 0.05
+V8_E1_TP_PCT = 0.15
+V8_E2_ATR_SL_MULT = 2.0
+V8_E2_ATR_TP_MULT = 6.0
+V8_TIMEOUT_BARS = 672  # 7 days at 15m
+V8_STARTING_EQUITY_USD = float(os.environ.get("V8_STARTING_EQUITY_USD", "200"))
+
+V8_ACCOUNTS: list[dict] = [
+    # macd_pullback_short_e2 — Week 8 PRIMARY SHORT
+    # Detector: daily MACD bear + 4h MACD cross-down after ≥2 above-signal bars
+    # Exit E2: 2× ATR SL / 6× ATR TP
+    {"strategy": "v8_macd_pullback_short_e2",
+     "signal_table": "scanner_signals_macd_pullback_short",
+     "direction": "short", "exit": "e2", "enabled": True},
+]
+
 
 D1E_ACCOUNTS: list[dict] = [
     # All 4 enabled at deploy. Disable individually after observation if any
@@ -422,6 +452,8 @@ class Signal:
     btc_score: float | None = None
     cls_score: float | None = None
     cls_kept: bool | None = None
+    # v8-only — strategy_group discriminator. None for v2/bigmover/d1e.
+    strategy_group: str | None = None
 
 
 def fetch_recent_signals(engine) -> list[Signal]:
@@ -509,6 +541,31 @@ def fetch_recent_signals(engine) -> list[Signal]:
                 btc_score=float(r[6]) if r[6] is not None else None,
                 cls_score=float(r[7]) if r[7] is not None else None,
                 cls_kept=bool(r[8]) if r[8] is not None else None,
+            ))
+
+        # v8 signals — table may not exist if scanner hasn't deployed yet.
+        try:
+            v8_rows = conn.execute(text("""
+                SELECT id, symbol, direction, signal_time, entry_price,
+                       atr14_at_entry, btc_score
+                FROM scanner_signals_macd_pullback_short
+                WHERE status = 'active'
+                  AND signal_time >= NOW() - INTERVAL '48 hours'
+                ORDER BY signal_time
+            """)).fetchall()
+        except Exception:
+            v8_rows = []
+        for r in v8_rows:
+            signals.append(Signal(
+                source_table="scanner_signals_macd_pullback_short",
+                source_id=r[0], symbol=r[1], direction=r[2],
+                ml_prob=1.0,  # sentinel — v8 has no classifier
+                signal_time=r[3], entry_price=float(r[4]),
+                regime_allowed=None,
+                signal_type="v8",
+                strategy_group="v8_macd_pullback_short",
+                atr14_at_entry=float(r[5]) if r[5] is not None else None,
+                btc_score=float(r[6]) if r[6] is not None else None,
             ))
 
     return signals
@@ -661,6 +718,109 @@ def open_d1e_paper_trade(engine, sig: Signal, account: dict):
             "venue": venue,
             "atr": sig.atr14_at_entry, "bs": sig.btc_score, "cs": sig.cls_score,
             "psc": pos_scale, "ek": account["exit"],
+        })
+
+
+def _v8_open_gross_notional_usd(engine, strategy: str) -> float:
+    """Sum of currently-open paper notional for a v8 strategy."""
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT COALESCE(SUM(position_usd), 0)
+            FROM paper_trades
+            WHERE strategy = :strat AND status = 'open'
+        """), {"strat": strategy}).fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def open_v8_paper_trade(engine, sig: Signal, account: dict):
+    """Open a paper trade on a v8 signal using v6 phase-switch ATR sizing."""
+    if sig.direction != account["direction"]:
+        return
+    if sig.atr14_at_entry is None or sig.atr14_at_entry <= 0:
+        return
+    if sig.entry_price is None or sig.entry_price <= 0:
+        return
+
+    strategy = account["strategy"]
+    # Equity tracked separately per strategy; uses V8_STARTING_EQUITY_USD as the seed.
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
+            WHERE threshold = :th AND strategy = :strat
+              AND status IN ('won', 'lost', 'timeout')
+        """), {"th": V8_SENTINEL_THRESHOLD, "strat": strategy}).fetchone()
+    realized_pnl_usd = float(row[0]) if row else 0.0
+    equity = V8_STARTING_EQUITY_USD + realized_pnl_usd
+
+    # Load phase + recent_pnl Kelly window
+    state = v8_sizing.load_state(engine, strategy)
+
+    open_gross_usd = _v8_open_gross_notional_usd(engine, strategy)
+
+    decision = v8_sizing.compute_size(
+        current_equity=equity,
+        exit_kind=account["exit"],
+        atr14_at_entry=sig.atr14_at_entry,
+        entry_price=sig.entry_price,
+        open_gross_notional_usd=open_gross_usd,
+        recent_pnl=state.recent_pnl,
+        current_phase=state.phase,
+    )
+
+    if not decision.take:
+        logger.info(
+            f"[DRY-RUN {strategy}] SKIP {sig.symbol} reason={decision.reason} "
+            f"phase={decision.phase} eq=${equity:.2f}"
+        )
+        return
+
+    # Persist the new phase if it switched
+    if decision.phase != state.phase:
+        state.phase = decision.phase
+        state.phase_switch_ts = datetime.now(timezone.utc)
+        state.phase_switch_eq = equity
+        v8_sizing.save_state(engine, state)
+
+    # Exit setup — same shape as d1e for consistency in downstream check_and_close.
+    if account["exit"] == "e1":
+        sl_price = sig.entry_price * (1 + V8_E1_SL_PCT)
+        tp_price = sig.entry_price * (1 - V8_E1_TP_PCT)
+    elif account["exit"] == "e2":
+        atr = sig.atr14_at_entry
+        sl_price = sig.entry_price + V8_E2_ATR_SL_MULT * atr
+        tp_price = max(sig.entry_price - V8_E2_ATR_TP_MULT * atr, 0.0)
+    else:
+        return
+
+    venue = venue_for_direction(sig.direction)
+    logger.info(
+        f"[DRY-RUN {strategy}] SHORT {sig.symbol} phase={decision.phase} "
+        f"risk={decision.risk_pct*100:.2f}% sl_dist={decision.sl_distance_pct*100:.2f}% "
+        f"notional=${decision.notional_usd:.2f} ({decision.notional_pct*100:.1f}% eq) "
+        f"entry=${sig.entry_price:.6f} sl=${sl_price:.6f} tp=${tp_price:.6f} "
+        f"eq=${equity:.2f}"
+    )
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO paper_trades
+            (source_table, source_id, threshold, strategy, symbol, direction, ml_prob,
+             entry_time, entry_price, position_usd, tp_price, sl_price, status,
+             regime_allowed, venue,
+             atr14_at_entry, btc_score, pos_scale, exit_kind)
+            VALUES (:st, :sid, :th, :strat, :sym, :dir, :ml, :et, :ep, :pos,
+                    :tp, :sl, 'open', NULL, :venue,
+                    :atr, :bs, :psc, :ek)
+            ON CONFLICT (source_table, source_id, threshold, strategy) DO NOTHING
+        """), {
+            "st": sig.source_table, "sid": sig.source_id,
+            "th": V8_SENTINEL_THRESHOLD, "strat": strategy,
+            "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
+            "et": sig.signal_time, "ep": sig.entry_price,
+            "pos": decision.notional_usd, "tp": tp_price, "sl": sl_price,
+            "venue": venue,
+            "atr": sig.atr14_at_entry, "bs": sig.btc_score,
+            "psc": decision.notional_pct,  # store notional_pct as pos_scale for v8
+            "ek": account["exit"],
         })
 
 
@@ -865,6 +1025,7 @@ def main():
     engine = create_engine(DB_URL)
     ensure_signal_tables(engine)
     ensure_paper_table(engine)
+    v8_sizing.ensure_state_table(engine)
 
     logger.info("=" * 60)
     logger.info("PAPER EXECUTOR (DRY-RUN) — v2 + bigmover + D1e (Phase 17)")
@@ -875,6 +1036,14 @@ def main():
     )
     enabled_d1e = [a['strategy'] for a in D1E_ACCOUNTS if a.get('enabled')]
     logger.info(f"D1e accounts:    {len(enabled_d1e)} enabled — {', '.join(enabled_d1e)}")
+    enabled_v8 = [a['strategy'] for a in V8_ACCOUNTS if a.get('enabled')]
+    logger.info(f"v8 accounts:     {len(enabled_v8)} enabled — {', '.join(enabled_v8)}")
+    logger.info(
+        f"v8 sizing:       phase-switch ATR-based "
+        f"(P1: Kelly 0.50, ceil 3%, gross 100%; P2: Kelly 0.25, ceil 1.5%, gross 60%; "
+        f"trigger ${v8_sizing.PHASE2_TRIGGER_USD:,.0f})"
+    )
+    logger.info(f"v8 starting eq: ${V8_STARTING_EQUITY_USD:.2f} per account")
     logger.info(
         f"D1e sizing:      {D1E_POSITION_PCT*100:.0f}%/{D1E_LEVERAGE}x × pos_scale "
         f"(S1: |btc|, S4: cls-0.5; cap {D1E_MAX_POS_SCALE})"
@@ -901,8 +1070,9 @@ def main():
             new_sigs = fetch_recent_signals(engine)
             v2_sigs = [s for s in new_sigs if s.signal_type is None]
             bm_sigs = [s for s in new_sigs
-                       if s.signal_type is not None and s.signal_type != "d1e"]
+                       if s.signal_type is not None and s.signal_type not in ("d1e", "v8")]
             d1e_sigs = [s for s in new_sigs if s.signal_type == "d1e"]
+            v8_sigs = [s for s in new_sigs if s.signal_type == "v8"]
 
             # v2 accounts (5 ML thresholds) — gated by V2_ENABLED flag.
             if V2_ENABLED:
@@ -957,6 +1127,34 @@ def main():
                         break
                     open_d1e_paper_trade(engine, sig, acct)
 
+            # v8 accounts (Week 8 BALANCED, phase-switch ATR sizing).
+            for acct in V8_ACCOUNTS:
+                if not acct.get("enabled", True):
+                    continue
+                halted = today_pnl_pct(
+                    engine, V8_SENTINEL_THRESHOLD, acct["strategy"]
+                ) <= -MAX_DAILY_LOSS_PCT
+                if halted:
+                    continue
+                # No fixed max-open count — gross notional cap inside v6 sizing
+                # already constrains concurrency. We still skip if a stale
+                # position somehow stacks above 20 (sanity bound).
+                if open_positions(
+                    engine, V8_SENTINEL_THRESHOLD, acct["strategy"]
+                ) >= 20:
+                    continue
+                for sig in v8_sigs:
+                    # account.signal_table filter — only process signals from
+                    # the account's own scanner table (one v8 account per scanner).
+                    if sig.source_table != acct.get("signal_table"):
+                        continue
+                    try:
+                        open_v8_paper_trade(engine, sig, acct)
+                    except Exception as e:
+                        logger.exception(
+                            f"v8 open_paper_trade error on {sig.symbol}: {e}"
+                        )
+
             if cycle % 10 == 0:
                 parts = []
                 if V2_ENABLED:
@@ -985,6 +1183,21 @@ def main():
                         engine, D1E_SENTINEL_THRESHOLD, acct["strategy"]
                     )
                     parts.append(f"{acct['strategy']}=${eq:.0f}({op})")
+                for acct in V8_ACCOUNTS:
+                    if not acct.get("enabled", True):
+                        continue
+                    with engine.begin() as conn:
+                        rrow = conn.execute(text("""
+                            SELECT COALESCE(SUM(pnl_usd), 0) FROM paper_trades
+                            WHERE threshold = :th AND strategy = :strat
+                              AND status IN ('won', 'lost', 'timeout')
+                        """), {"th": V8_SENTINEL_THRESHOLD, "strat": acct["strategy"]}).fetchone()
+                    eq = V8_STARTING_EQUITY_USD + (float(rrow[0]) if rrow else 0.0)
+                    op = open_positions(
+                        engine, V8_SENTINEL_THRESHOLD, acct["strategy"]
+                    )
+                    state = v8_sizing.load_state(engine, acct["strategy"])
+                    parts.append(f"{acct['strategy']}=${eq:.0f}({op}/{state.phase})")
                 logger.info(f"Cycle {cycle}: {' | '.join(parts)}")
 
             time.sleep(POLL_INTERVAL_SEC)
