@@ -313,7 +313,7 @@ export default async function ScannerPage({ searchParams }: Props) {
                 <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-center text-slate-500 font-mono">{Number(t.trade_num)}</td>
                   <td className="px-3 py-1.5 text-slate-300 font-mono whitespace-nowrap">
-                    {new Date(t.signal_time).toLocaleDateString("en-CA")}
+                    {new Date(t.signal_time).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
                   <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{(t.direction || "").toUpperCase()}</td>
@@ -363,7 +363,7 @@ export default async function ScannerPage({ searchParams }: Props) {
             <tbody>
               {monthly.map((r: any, i: number) => (
                 <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
-                  <td className="px-3 py-1.5 text-slate-300 font-mono">{new Date(r.month).toLocaleDateString("en-CA", { year: "numeric", month: "short" })}</td>
+                  <td className="px-3 py-1.5 text-slate-300 font-mono">{new Date(r.month).toLocaleDateString("en-CA", { year: "numeric", month: "short", timeZone: "Asia/Jakarta" })}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-400">{r.trades}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-400">{r.wins}/{r.losses}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${Number(r.wr) >= 50 ? "text-green-400" : "text-red-400"}`}>{Number(r.wr)}%</td>
@@ -457,7 +457,7 @@ export default async function ScannerPage({ searchParams }: Props) {
               {trades.map((t: any, i: number) => (
                 <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.signal_time).toLocaleDateString("en-CA")}
+                    {new Date(t.signal_time).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
                   <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{(t.direction || "").toUpperCase()}</td>
@@ -525,7 +525,7 @@ function LiveSignalCard({ title, direction, signals }: { title: string; directio
             {signals.map((s: any, i: number) => (
               <tr key={i} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                 <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                  {new Date(s.signal_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {new Date(s.signal_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
                 </td>
                 <td className="px-3 py-1.5 text-white font-medium">{s.symbol.replace("USDT", "")}</td>
                 <td className="px-3 py-1.5 text-right font-mono text-brand-400">{Number(s.ml_prob ?? 0).toFixed(2)}</td>

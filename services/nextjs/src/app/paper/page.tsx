@@ -280,7 +280,7 @@ export default async function PaperTradesPage({ searchParams }: Props) {
               {openTrades.map((t: any) => (
                 <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
                   <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{t.direction.toUpperCase()}</td>
@@ -352,10 +352,10 @@ export default async function PaperTradesPage({ searchParams }: Props) {
               {closedTrades.map((t: any) => (
                 <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.exit_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(t.exit_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
                   <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{t.direction.toUpperCase()}</td>

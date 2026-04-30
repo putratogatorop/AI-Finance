@@ -40,6 +40,7 @@ export function PriceChart({
     date: new Date(d.date).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: "Asia/Jakarta",
     }),
     close: d.close,
     high: d.high,
