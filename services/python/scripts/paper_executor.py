@@ -30,6 +30,7 @@ sys.path.insert(0, ".")
 
 from src import db_adapters  # noqa: F401  # registers numpy→psycopg2 adapters
 from src.ml.v8 import sizing as v8_sizing  # v8 phase-switch ATR sizing module
+from src.ml.v8.classifier import V8Classifier  # v8 trade-quality classifier (sizing-mode)
 
 # ── HARD SAFETY ──────────────────────────────────────────────────────
 DRY_RUN = True  # NEVER change to False in this file — real trading is a separate script
@@ -756,8 +757,14 @@ def _v8_open_gross_notional_usd(engine, strategy: str) -> float:
     return float(row[0]) if row else 0.0
 
 
-def open_v8_paper_trade(engine, sig: Signal, account: dict):
-    """Open a paper trade on a v8 signal using v6 phase-switch ATR sizing."""
+def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classifier | None = None):
+    """Open a paper trade on a v8 signal using v6 phase-switch ATR sizing.
+
+    If `classifier` is provided, applies the trade-quality classifier in
+    SIZING-MODE: the v6 notional gets multiplied by the classifier's score-to-size
+    mapping (multiplier in [size_low, size_high], capital-neutral on average).
+    See src/ml/v8/classifier.py for the methodology.
+    """
     if sig.direction != account["direction"]:
         return
     if sig.atr14_at_entry is None or sig.atr14_at_entry <= 0:
@@ -805,6 +812,26 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict):
         state.phase_switch_eq = equity
         v8_sizing.save_state(engine, state)
 
+    # ── v8 trade-quality classifier (sizing-mode) ──
+    cls_multiplier = 1.0
+    cls_info: dict = {"mode": "off"}
+    cls_score: float | None = None
+    if classifier is not None:
+        try:
+            cls_multiplier, cls_info = classifier.score_size(
+                strategy=strategy,
+                symbol=sig.symbol,
+                entry_time=sig.signal_time,
+                signal_row={"btc_score": sig.btc_score, "atr14_at_entry": sig.atr14_at_entry},
+            )
+            cls_score = cls_info.get("score")
+        except Exception as e:
+            logger.warning(f"v8 classifier exception on {strategy}/{sig.symbol}: {e}")
+            cls_multiplier, cls_info = 1.0, {"mode": "exception", "reason": str(e)[:120]}
+
+    adjusted_notional_usd = decision.notional_usd * cls_multiplier
+    adjusted_notional_pct = decision.notional_pct * cls_multiplier
+
     # Exit setup — direction-aware (long: SL below entry, TP above; short: reversed).
     if account["exit"] == "e1":
         if sig.direction == "short":
@@ -828,10 +855,15 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict):
     logger.info(
         f"[DRY-RUN {strategy}] {sig.direction.upper()} {sig.symbol} phase={decision.phase} "
         f"risk={decision.risk_pct*100:.2f}% sl_dist={decision.sl_distance_pct*100:.2f}% "
-        f"notional=${decision.notional_usd:.2f} ({decision.notional_pct*100:.1f}% eq) "
-        f"entry=${sig.entry_price:.6f} sl=${sl_price:.6f} tp=${tp_price:.6f} "
-        f"eq=${equity:.2f}"
+        f"v6_notional=${decision.notional_usd:.2f} cls_mode={cls_info.get('mode')} "
+        f"cls_score={cls_score if cls_score is not None else '—'} "
+        f"cls_mult={cls_multiplier:.3f} → adj_notional=${adjusted_notional_usd:.2f} "
+        f"({adjusted_notional_pct*100:.1f}% eq) entry=${sig.entry_price:.6f} "
+        f"sl=${sl_price:.6f} tp=${tp_price:.6f} eq=${equity:.2f}"
     )
+    # Use cls_score (model probability) as ml_prob — distinguishes sizing-mode rows
+    # from sentinel-1.0 rows in earlier deploys.
+    ml_prob_to_save = cls_score if cls_score is not None else sig.ml_prob
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO paper_trades
@@ -846,12 +878,12 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict):
         """), {
             "st": sig.source_table, "sid": sig.source_id,
             "th": V8_SENTINEL_THRESHOLD, "strat": strategy,
-            "sym": sig.symbol, "dir": sig.direction, "ml": sig.ml_prob,
+            "sym": sig.symbol, "dir": sig.direction, "ml": ml_prob_to_save,
             "et": sig.signal_time, "ep": sig.entry_price,
-            "pos": decision.notional_usd, "tp": tp_price, "sl": sl_price,
+            "pos": adjusted_notional_usd, "tp": tp_price, "sl": sl_price,
             "venue": venue,
             "atr": sig.atr14_at_entry, "bs": sig.btc_score,
-            "psc": decision.notional_pct,  # store notional_pct as pos_scale for v8
+            "psc": adjusted_notional_pct,  # store classifier-adjusted notional_pct as pos_scale
             "ek": account["exit"],
         })
 
@@ -1074,6 +1106,16 @@ def main():
     ensure_paper_table(engine)
     v8_sizing.ensure_state_table(engine)
 
+    # Initialize v8 trade-quality classifier (sizing-mode). Loads .joblib
+    # models from services/python/models/v8_classifier_3y/. If models are
+    # missing or fail to load, paper executor still runs — affected detectors
+    # just get classifier multiplier=1.0 (no size adjustment).
+    try:
+        v8_classifier = V8Classifier(engine)
+    except Exception as e:
+        logger.warning(f"v8 classifier failed to initialize: {e} — proceeding without sizing-mode")
+        v8_classifier = None
+
     logger.info("=" * 60)
     logger.info("PAPER EXECUTOR (DRY-RUN) — v2 + bigmover + D1e (Phase 17)")
     logger.info(f"v2 thresholds:   {THRESHOLDS} (V2_ENABLED={V2_ENABLED})")
@@ -1085,6 +1127,11 @@ def main():
     logger.info(f"D1e accounts:    {len(enabled_d1e)} enabled — {', '.join(enabled_d1e)}")
     enabled_v8 = [a['strategy'] for a in V8_ACCOUNTS if a.get('enabled')]
     logger.info(f"v8 accounts:     {len(enabled_v8)} enabled — {', '.join(enabled_v8)}")
+    if v8_classifier is not None:
+        loaded = sorted(v8_classifier._models.keys())
+        logger.info(f"v8 classifier:   sizing-mode ENABLED for {len(loaded)} detector(s) — {', '.join(loaded)}")
+    else:
+        logger.info("v8 classifier:   DISABLED (no models loaded)")
     logger.info(
         f"v8 sizing:       phase-switch ATR-based "
         f"(P1: Kelly 0.50, ceil 3%, gross 100%; P2: Kelly 0.25, ceil 1.5%, gross 60%; "
@@ -1198,7 +1245,7 @@ def main():
                     if sig.source_table != acct.get("signal_table"):
                         continue
                     try:
-                        open_v8_paper_trade(engine, sig, acct)
+                        open_v8_paper_trade(engine, sig, acct, classifier=v8_classifier)
                     except Exception as e:
                         logger.exception(
                             f"v8 open_paper_trade error on {sig.symbol}: {e}"
