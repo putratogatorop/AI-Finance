@@ -40,6 +40,7 @@ export function PerformanceChart({
     date: new Date(d.date).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: "Asia/Jakarta",
     }),
     value: d.value,
   }));

@@ -67,6 +67,7 @@ export function formatDateTime(isoString: string): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Asia/Jakarta",
   });
 }
 
@@ -79,6 +80,7 @@ export function formatDate(dateString: string): string {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }
 

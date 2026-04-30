@@ -112,6 +112,7 @@ export default async function TokenDetailPage({
                     {new Date(s.signal_time).toLocaleString("en-GB", {
                       month: "short", day: "2-digit",
                       hour: "2-digit", minute: "2-digit",
+                      timeZone: "Asia/Jakarta",
                     })}
                   </td>
                   <td className="table-cell">

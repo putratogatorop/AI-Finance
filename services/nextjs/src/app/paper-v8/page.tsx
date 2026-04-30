@@ -316,7 +316,7 @@ export default async function PaperV8Page({ searchParams }: Props) {
                 <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
                     {new Date(t.entry_time).toLocaleString("en-CA", {
-                      month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                      month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta",
                     })}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-slate-300 text-[10px]">
@@ -414,7 +414,7 @@ export default async function PaperV8Page({ searchParams }: Props) {
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
                     {t.exit_time
                       ? new Date(t.exit_time).toLocaleString("en-CA", {
-                          month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                          month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta",
                         })
                       : "—"}
                   </td>

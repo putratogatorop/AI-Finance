@@ -133,7 +133,7 @@ export default async function PaperD1ePage({ searchParams }: Props) {
         <KPI
           label="D1e Signals Fired"
           value={`${signalFunnel.total}`}
-          hint={signalFunnel.latest ? `latest ${new Date(signalFunnel.latest).toLocaleString()}` : "no signals yet"}
+          hint={signalFunnel.latest ? `latest ${new Date(signalFunnel.latest).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}` : "no signals yet"}
         />
         <KPI
           label="Kept by v4 (≥ 0.5010)"
@@ -240,7 +240,7 @@ export default async function PaperD1ePage({ searchParams }: Props) {
               {openTrades.map((t: any) => (
                 <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-slate-300">{(t.strategy || "").replace("d1e_", "")}</td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
@@ -300,7 +300,7 @@ export default async function PaperD1ePage({ searchParams }: Props) {
               {closedTrades.map((t: any) => (
                 <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
                   <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {t.exit_time ? new Date(t.exit_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                    {t.exit_time ? new Date(t.exit_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—"}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-slate-300">{(t.strategy || "").replace("d1e_", "")}</td>
                   <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
