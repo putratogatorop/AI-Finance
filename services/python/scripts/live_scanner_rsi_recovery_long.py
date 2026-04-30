@@ -1,23 +1,22 @@
 """Live scanner — rsi_recovery_long detector (Week 8 v8 BALANCED, locked).
 
-Fires a LONG entry when daily RSI(14) recovers from the oversold zone:
-  1. Daily RSI(14) was below RSI_OVERSOLD_THRESHOLD (35) yesterday.
-  2. Daily RSI(14) crosses above RSI_OVERSOLD_THRESHOLD today (recovery).
-  3. Entry on the first 15m bar of the new day where this condition fires.
-  4. 24h per-symbol cooldown.
+Fires a LONG entry when 4H RSI(14) recovers from the oversold zone above the
+trend filter:
+  1. 4H RSI(14) was ≤ RSI_OVERSOLD (30) on the previous 4h bar.
+  2. 4H RSI(14) > RSI_OVERSOLD on the current closed 4h bar (cross-up).
+  3. 4H close at the cross > 4H EMA(EMA_TREND_SPAN=50) (trend filter).
+  4. Entry on the FIRST 15m bar of the new 4h period where the cross fires.
+  5. 24h per-symbol cooldown.
 
-No MACD regime filter — this detector is intentionally regime-agnostic,
-which is why it has near-zero correlation (0.007) with macd_pullback_long_e2
-and provides the key diversification benefit in the BALANCED 4-det portfolio.
+No MACD regime filter — RSI+EMA50 is the regime check. This detector has
+near-zero correlation (0.007) with macd_pullback_long_e2 in the validated
+3-year backtest and provides the diversification benefit in the BALANCED
+4-det portfolio.
 
 Validated in backtest_entry_sweep_v3_d71e63c6_20260429T030622Z:
   rsi_recovery_long_e2: holdout PF 2.222, wf_p5 1.812, DSR 1.000,
   MC p5 1.474. Ship-eligible with eff_n waiver (only gate failed).
   Portfolio-level wf_p5 = 1.486 in BALANCED 4-det stack.
-
-NOTE: The original backtest_entry_sweep_v3 script was a local research script
-and was not committed to git. This live scanner implements the pre-registered
-detector spec (RSI recovery from oversold zone).
 
 Usage from services/python/:
     python scripts/live_scanner_rsi_recovery_long.py
@@ -56,7 +55,8 @@ MIN_VOLUME_USD = 500_000
 
 ATR_PERIOD = 14
 RSI_PERIOD = 14
-RSI_OVERSOLD_THRESHOLD = 35.0  # daily RSI cross-up through this level = recovery signal
+RSI_OVERSOLD = 30.0  # 4h RSI cross-up from ≤30 to >30 = recovery (matches backtest_entry_sweep_v3)
+EMA_TREND_SPAN = 50  # 4h EMA(50) trend filter — only fire when 4h close > EMA50
 COOLDOWN_SECONDS = 96 * 900  # 24h per symbol
 
 Path("logs").mkdir(exist_ok=True)
@@ -143,6 +143,11 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def _ema(close: pd.Series, span: int) -> pd.Series:
+    """Standard EMA matching pandas .ewm(span=...).mean()."""
+    return close.ewm(span=span, adjust=False).mean()
+
+
 def _macd(close: pd.Series, fast=12, slow=26, signal=9) -> pd.DataFrame:
     ema_fast = close.ewm(span=fast, adjust=False).mean()
     ema_slow = close.ewm(span=slow, adjust=False).mean()
@@ -190,9 +195,12 @@ def _compute_btc_score(btc_df: pd.DataFrame | None) -> float:
 def detect_rsi_recovery_long(df: pd.DataFrame, btc_score: float) -> dict | None:
     """Evaluate rsi_recovery_long at the latest 15m bar.
 
-    Fires when daily RSI(14) crosses from below RSI_OVERSOLD_THRESHOLD (35)
-    to above it on the current day (yesterday was oversold, today recovered).
-    Entry on the first 15m bar of the day where this condition is True.
+    Matches the validated detector in backtest_entry_sweep_v3.py (run d71e63c6,
+    holdout PF 2.222, wf_p5 1.812, DSR 1.000):
+      - 4H RSI(14) crosses up from ≤ RSI_OVERSOLD (30) to > RSI_OVERSOLD on the
+        latest closed 4h bar.
+      - 4H close at the cross > 4H EMA(EMA_TREND_SPAN=50) (trend filter).
+      - Entry on the FIRST 15m bar of the new 4h period where the cross fires.
     """
     if len(df) < 4 * 96:
         return None
@@ -203,39 +211,31 @@ def detect_rsi_recovery_long(df: pd.DataFrame, btc_score: float) -> dict | None:
     low_arr = df["low"].astype(float).to_numpy()
     close_arr = df["close"].astype(float).to_numpy()
 
-    # Daily RSI
-    d_close = s_close.resample("1D").last().dropna()
-    if len(d_close) < RSI_PERIOD + 5:
+    # 4H RSI + EMA50
+    h4_close = s_close.resample("4h").last().dropna()
+    if len(h4_close) < RSI_PERIOD + EMA_TREND_SPAN:
         return None
-    d_rsi = _rsi(d_close, RSI_PERIOD)
+    h4_rsi = _rsi(h4_close, RSI_PERIOD)
+    h4_ema50 = _ema(h4_close, EMA_TREND_SPAN)
+    rsi_cross_h4 = (
+        (h4_rsi > RSI_OVERSOLD)
+        & (h4_rsi.shift(1) <= RSI_OVERSOLD).fillna(False)
+        & (h4_close > h4_ema50)
+    )
 
     last_15m_ts = ts_idx[-1]
-    current_day_ts = last_15m_ts.floor("D")
+    current_4h_ts = last_15m_ts.floor("4h")
 
-    # Need at least today and yesterday in the daily index
-    if current_day_ts not in d_rsi.index:
+    if current_4h_ts not in rsi_cross_h4.index:
         return None
-    daily_pos = d_rsi.index.get_loc(current_day_ts)
-    if daily_pos < 1:
+    if not bool(rsi_cross_h4.loc[current_4h_ts]):
         return None
 
-    rsi_today = float(d_rsi.iloc[daily_pos])
-    rsi_yesterday = float(d_rsi.iloc[daily_pos - 1])
-
-    # RSI recovery cross-up: was below threshold yesterday, now above today
-    if not (np.isfinite(rsi_today) and np.isfinite(rsi_yesterday)):
+    # First 15m bar of the new 4h period (no double-firing within the 4h)
+    if len(ts_idx) < 2:
         return None
-    if rsi_yesterday >= RSI_OVERSOLD_THRESHOLD:
-        return None  # wasn't oversold yesterday
-    if rsi_today < RSI_OVERSOLD_THRESHOLD:
-        return None  # still oversold today, no cross-up yet
-
-    # Entry: first 15m bar of this day (any bar in today counts as valid entry
-    # if this is the day the cross occurred, since the cross is computed on daily close)
-    # Only fire on the FIRST 15m bar of the current day to avoid re-firing within the day.
-    prev_15m_day = ts_idx[-2].floor("D") if len(ts_idx) >= 2 else None
-    if prev_15m_day == current_day_ts:
-        return None  # already processed an earlier bar today
+    if ts_idx[-2].floor("4h") == current_4h_ts:
+        return None
 
     atr_arr = _atr14(high_arr, low_arr, close_arr)
     atr14 = float(atr_arr[-1]) if len(atr_arr) > 0 and np.isfinite(atr_arr[-1]) else float("nan")
@@ -252,15 +252,18 @@ def detect_rsi_recovery_long(df: pd.DataFrame, btc_score: float) -> dict | None:
         else last_15m_ts.to_pydatetime()
     )
 
+    h4_idx = h4_close.index.get_loc(current_4h_ts)
     return {
         "symbol": df["asset"].iloc[0] if "asset" in df.columns else None,
         "direction": "long",
         "signal_time": sig_time,
         "entry_price": entry_price,
         "atr14_at_entry": atr14,
-        "rsi_today": rsi_today,
-        "rsi_yesterday": rsi_yesterday,
-        "rsi_threshold": RSI_OVERSOLD_THRESHOLD,
+        "h4_rsi": float(h4_rsi.iloc[h4_idx]),
+        "h4_rsi_prev": float(h4_rsi.iloc[h4_idx - 1]) if h4_idx > 0 else float("nan"),
+        "h4_close": float(h4_close.iloc[h4_idx]),
+        "h4_ema50": float(h4_ema50.iloc[h4_idx]),
+        "rsi_threshold": RSI_OVERSOLD,
         "btc_score": btc_score,
     }
 
@@ -276,14 +279,28 @@ def ensure_table(engine):
                 status VARCHAR(10) DEFAULT 'active',
                 entry_price DOUBLE PRECISION,
                 atr14_at_entry DOUBLE PRECISION,
-                rsi_today DOUBLE PRECISION,
-                rsi_yesterday DOUBLE PRECISION,
+                h4_rsi DOUBLE PRECISION,
+                h4_rsi_prev DOUBLE PRECISION,
+                h4_close DOUBLE PRECISION,
+                h4_ema50 DOUBLE PRECISION,
                 rsi_threshold DOUBLE PRECISION,
                 btc_score DOUBLE PRECISION,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE (symbol, direction, signal_time)
             )
         """))
+        conn.execute(text(
+            "ALTER TABLE scanner_signals_rsi_recovery_long ADD COLUMN IF NOT EXISTS h4_rsi DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE scanner_signals_rsi_recovery_long ADD COLUMN IF NOT EXISTS h4_rsi_prev DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE scanner_signals_rsi_recovery_long ADD COLUMN IF NOT EXISTS h4_close DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE scanner_signals_rsi_recovery_long ADD COLUMN IF NOT EXISTS h4_ema50 DOUBLE PRECISION"
+        ))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_rsirecov_signal_time
             ON scanner_signals_rsi_recovery_long (signal_time DESC)
@@ -302,15 +319,16 @@ def write_signal(engine, *, hit: dict) -> bool:
                 INSERT INTO scanner_signals_rsi_recovery_long
                 (symbol, direction, signal_time, status,
                  entry_price, atr14_at_entry,
-                 rsi_today, rsi_yesterday, rsi_threshold, btc_score)
+                 h4_rsi, h4_rsi_prev, h4_close, h4_ema50, rsi_threshold, btc_score)
                 VALUES (:symbol, :direction, :sig_t, 'active',
-                        :ep, :atr, :rt, :ry, :rth, :bs)
+                        :ep, :atr, :hr, :hrp, :hc, :he, :rth, :bs)
                 ON CONFLICT (symbol, direction, signal_time) DO NOTHING
             """), {
                 "symbol": hit["symbol"], "direction": hit["direction"],
                 "sig_t": hit["signal_time"],
                 "ep": hit["entry_price"], "atr": hit["atr14_at_entry"],
-                "rt": hit["rsi_today"], "ry": hit["rsi_yesterday"],
+                "hr": hit["h4_rsi"], "hrp": hit["h4_rsi_prev"],
+                "hc": hit["h4_close"], "he": hit["h4_ema50"],
                 "rth": hit["rsi_threshold"],
                 "bs": hit["btc_score"] if np.isfinite(hit["btc_score"]) else None,
             })
@@ -325,8 +343,8 @@ def main() -> None:
     logger.info("LIVE SCANNER — rsi_recovery_long (Week 8 v8 BALANCED, locked)")
     logger.info("=" * 60)
     logger.info(
-        f"Detector: daily RSI(14) cross-up through {RSI_OVERSOLD_THRESHOLD} "
-        f"(was oversold yesterday, recovered today), "
+        f"Detector: 4H RSI(14) cross-up from ≤{RSI_OVERSOLD} to >{RSI_OVERSOLD} "
+        f"AND 4H close > 4H EMA({EMA_TREND_SPAN}), "
         f"cooldown {COOLDOWN_SECONDS // 3600}h"
     )
 
@@ -425,8 +443,9 @@ def main() -> None:
                     logger.info(
                         f"  FIRED: {symbol} ep={hit['entry_price']:.4f} "
                         f"atr={hit['atr14_at_entry']:.4f} "
-                        f"rsi_yest={hit['rsi_yesterday']:.1f} "
-                        f"rsi_today={hit['rsi_today']:.1f}"
+                        f"h4_rsi_prev={hit['h4_rsi_prev']:.1f} "
+                        f"h4_rsi={hit['h4_rsi']:.1f} "
+                        f"h4_close/ema50={hit['h4_close']:.4f}/{hit['h4_ema50']:.4f}"
                     )
 
             elapsed = time.time() - cycle_start

@@ -1,0 +1,542 @@
+{
+  "snapshot_date": "2026-04-27",
+  "hold_out_start": "2026-03-28",
+  "configs": [
+    {
+      "name": "baseline",
+      "pullback_pct": null,
+      "btc_ema_gate": false,
+      "confirm_bars": null,
+      "momentum_7d_gate": false
+    },
+    {
+      "name": "C only \u2014 pullback \u226530%",
+      "pullback_pct": 0.3,
+      "btc_ema_gate": false,
+      "confirm_bars": null,
+      "momentum_7d_gate": false
+    },
+    {
+      "name": "D only \u2014 BTC 4h EMA50 gate",
+      "pullback_pct": null,
+      "btc_ema_gate": true,
+      "confirm_bars": null,
+      "momentum_7d_gate": false
+    },
+    {
+      "name": "E only \u2014 30min confirm",
+      "pullback_pct": null,
+      "btc_ema_gate": false,
+      "confirm_bars": 2,
+      "momentum_7d_gate": false
+    },
+    {
+      "name": "F only \u2014 7d momentum gate",
+      "pullback_pct": null,
+      "btc_ema_gate": false,
+      "confirm_bars": null,
+      "momentum_7d_gate": true
+    },
+    {
+      "name": "C+D+E+F (all on)",
+      "pullback_pct": 0.3,
+      "btc_ema_gate": true,
+      "confirm_bars": 2,
+      "momentum_7d_gate": true
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "macd_pullback_short": {
+        "all": {
+          "trades": 689,
+          "pf": 2.6631,
+          "wr": 0.5356,
+          "total_pnl_pct": 856.383
+        },
+        "train": {
+          "trades": 501,
+          "pf": 3.3495,
+          "wr": 0.5968,
+          "total_pnl_pct": 814.37
+        },
+        "hold_out": {
+          "trades": 188,
+          "pf": 1.2496,
+          "wr": 0.3723,
+          "total_pnl_pct": 42.012
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 411,
+          "pf": 2.7576,
+          "wr": 0.562,
+          "total_pnl_pct": 533.06
+        },
+        "train": {
+          "trades": 325,
+          "pf": 3.3428,
+          "wr": 0.6154,
+          "total_pnl_pct": 518.309
+        },
+        "hold_out": {
+          "trades": 86,
+          "pf": 1.1798,
+          "wr": 0.3605,
+          "total_pnl_pct": 14.75
+        }
+      },
+      "macd_pullback_long": {
+        "all": {
+          "trades": 3184,
+          "pf": 1.4604,
+          "wr": 0.3678,
+          "total_pnl_pct": 1787.724
+        },
+        "train": {
+          "trades": 1991,
+          "pf": 1.4139,
+          "wr": 0.3446,
+          "total_pnl_pct": 977.122
+        },
+        "hold_out": {
+          "trades": 1193,
+          "pf": 1.5326,
+          "wr": 0.4065,
+          "total_pnl_pct": 810.602
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 39,
+          "pf": 6.1384,
+          "wr": 0.7179,
+          "total_pnl_pct": 110.001
+        },
+        "train": {
+          "trades": 39,
+          "pf": 6.1384,
+          "wr": 0.7179,
+          "total_pnl_pct": 110.001
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      }
+    },
+    "C only \u2014 pullback \u226530%": {
+      "macd_pullback_short": {
+        "all": {
+          "trades": 279,
+          "pf": 3.1795,
+          "wr": 0.5914,
+          "total_pnl_pct": 385.271
+        },
+        "train": {
+          "trades": 205,
+          "pf": 4.0373,
+          "wr": 0.6585,
+          "total_pnl_pct": 353.106
+        },
+        "hold_out": {
+          "trades": 74,
+          "pf": 1.5315,
+          "wr": 0.4054,
+          "total_pnl_pct": 32.165
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 169,
+          "pf": 3.5062,
+          "wr": 0.6331,
+          "total_pnl_pct": 257.167
+        },
+        "train": {
+          "trades": 136,
+          "pf": 4.2832,
+          "wr": 0.6838,
+          "total_pnl_pct": 245.869
+        },
+        "hold_out": {
+          "trades": 33,
+          "pf": 1.4075,
+          "wr": 0.4242,
+          "total_pnl_pct": 11.299
+        }
+      },
+      "macd_pullback_long": {
+        "all": {
+          "trades": 1997,
+          "pf": 1.4363,
+          "wr": 0.359,
+          "total_pnl_pct": 1079.222
+        },
+        "train": {
+          "trades": 1308,
+          "pf": 1.4538,
+          "wr": 0.3448,
+          "total_pnl_pct": 698.827
+        },
+        "hold_out": {
+          "trades": 689,
+          "pf": 1.4074,
+          "wr": 0.3861,
+          "total_pnl_pct": 380.396
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 26,
+          "pf": 7.0064,
+          "wr": 0.7692,
+          "total_pnl_pct": 63.112
+        },
+        "train": {
+          "trades": 26,
+          "pf": 7.0064,
+          "wr": 0.7692,
+          "total_pnl_pct": 63.112
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      }
+    },
+    "D only \u2014 BTC 4h EMA50 gate": {
+      "macd_pullback_short": {
+        "all": {
+          "trades": 470,
+          "pf": 2.8976,
+          "wr": 0.5426,
+          "total_pnl_pct": 652.004
+        },
+        "train": {
+          "trades": 380,
+          "pf": 3.4208,
+          "wr": 0.5947,
+          "total_pnl_pct": 651.156
+        },
+        "hold_out": {
+          "trades": 90,
+          "pf": 1.0114,
+          "wr": 0.3222,
+          "total_pnl_pct": 0.848
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 275,
+          "pf": 2.8011,
+          "wr": 0.5527,
+          "total_pnl_pct": 374.205
+        },
+        "train": {
+          "trades": 231,
+          "pf": 3.3089,
+          "wr": 0.6061,
+          "total_pnl_pct": 379.217
+        },
+        "hold_out": {
+          "trades": 44,
+          "pf": 0.8849,
+          "wr": 0.2727,
+          "total_pnl_pct": -5.012
+        }
+      },
+      "macd_pullback_long": {
+        "all": {
+          "trades": 2135,
+          "pf": 1.3113,
+          "wr": 0.3499,
+          "total_pnl_pct": 812.205
+        },
+        "train": {
+          "trades": 1097,
+          "pf": 1.0185,
+          "wr": 0.2954,
+          "total_pnl_pct": 24.451
+        },
+        "hold_out": {
+          "trades": 1038,
+          "pf": 1.6133,
+          "wr": 0.4075,
+          "total_pnl_pct": 787.754
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 10,
+          "pf": 18.7838,
+          "wr": 0.9,
+          "total_pnl_pct": 27.873
+        },
+        "train": {
+          "trades": 10,
+          "pf": 18.7838,
+          "wr": 0.9,
+          "total_pnl_pct": 27.873
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      }
+    },
+    "E only \u2014 30min confirm": {
+      "macd_pullback_short": {
+        "all": {
+          "trades": 391,
+          "pf": 2.0702,
+          "wr": 0.4885,
+          "total_pnl_pct": 338.794
+        },
+        "train": {
+          "trades": 281,
+          "pf": 2.7321,
+          "wr": 0.5445,
+          "total_pnl_pct": 354.571
+        },
+        "hold_out": {
+          "trades": 110,
+          "pf": 0.8589,
+          "wr": 0.3455,
+          "total_pnl_pct": -15.778
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 238,
+          "pf": 2.3572,
+          "wr": 0.5168,
+          "total_pnl_pct": 251.601
+        },
+        "train": {
+          "trades": 185,
+          "pf": 3.088,
+          "wr": 0.573,
+          "total_pnl_pct": 261.433
+        },
+        "hold_out": {
+          "trades": 53,
+          "pf": 0.8366,
+          "wr": 0.3208,
+          "total_pnl_pct": -9.832
+        }
+      },
+      "macd_pullback_long": {
+        "all": {
+          "trades": 1679,
+          "pf": 1.4908,
+          "wr": 0.3824,
+          "total_pnl_pct": 971.907
+        },
+        "train": {
+          "trades": 1053,
+          "pf": 1.3816,
+          "wr": 0.3514,
+          "total_pnl_pct": 468.039
+        },
+        "hold_out": {
+          "trades": 626,
+          "pf": 1.6686,
+          "wr": 0.4345,
+          "total_pnl_pct": 503.868
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 24,
+          "pf": 4.8435,
+          "wr": 0.6667,
+          "total_pnl_pct": 64.471
+        },
+        "train": {
+          "trades": 24,
+          "pf": 4.8435,
+          "wr": 0.6667,
+          "total_pnl_pct": 64.471
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      }
+    },
+    "F only \u2014 7d momentum gate": {
+      "macd_pullback_short": {
+        "all": {
+          "trades": 544,
+          "pf": 2.8126,
+          "wr": 0.5441,
+          "total_pnl_pct": 710.171
+        },
+        "train": {
+          "trades": 396,
+          "pf": 3.671,
+          "wr": 0.6136,
+          "total_pnl_pct": 693.216
+        },
+        "hold_out": {
+          "trades": 148,
+          "pf": 1.1282,
+          "wr": 0.3581,
+          "total_pnl_pct": 16.955
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 304,
+          "pf": 2.8251,
+          "wr": 0.5625,
+          "total_pnl_pct": 398.1
+        },
+        "train": {
+          "trades": 235,
+          "pf": 3.551,
+          "wr": 0.6298,
+          "total_pnl_pct": 391.799
+        },
+        "hold_out": {
+          "trades": 69,
+          "pf": 1.0976,
+          "wr": 0.3333,
+          "total_pnl_pct": 6.301
+        }
+      },
+      "macd_pullback_long": {
+        "all": {
+          "trades": 2006,
+          "pf": 1.4302,
+          "wr": 0.3599,
+          "total_pnl_pct": 1226.585
+        },
+        "train": {
+          "trades": 1116,
+          "pf": 1.3684,
+          "wr": 0.3235,
+          "total_pnl_pct": 576.281
+        },
+        "hold_out": {
+          "trades": 890,
+          "pf": 1.5052,
+          "wr": 0.4056,
+          "total_pnl_pct": 650.304
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 39,
+          "pf": 6.1384,
+          "wr": 0.7179,
+          "total_pnl_pct": 110.001
+        },
+        "train": {
+          "trades": 39,
+          "pf": 6.1384,
+          "wr": 0.7179,
+          "total_pnl_pct": 110.001
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      }
+    },
+    "C+D+E+F (all on)": {
+      "macd_pullback_long": {
+        "all": {
+          "trades": 422,
+          "pf": 1.2238,
+          "wr": 0.346,
+          "total_pnl_pct": 137.681
+        },
+        "train": {
+          "trades": 208,
+          "pf": 0.6721,
+          "wr": 0.2452,
+          "total_pnl_pct": -96.07
+        },
+        "hold_out": {
+          "trades": 214,
+          "pf": 1.7257,
+          "wr": 0.4439,
+          "total_pnl_pct": 233.751
+        }
+      },
+      "rsi_recovery_long": {
+        "all": {
+          "trades": 3,
+          "pf": Infinity,
+          "wr": 1.0,
+          "total_pnl_pct": 14.053
+        },
+        "train": {
+          "trades": 3,
+          "pf": Infinity,
+          "wr": 1.0,
+          "total_pnl_pct": 14.053
+        },
+        "hold_out": {
+          "trades": 0,
+          "pf": 0.0,
+          "wr": 0.0,
+          "total_pnl_pct": 0.0
+        }
+      },
+      "macd_pullback_short": {
+        "all": {
+          "trades": 77,
+          "pf": 3.201,
+          "wr": 0.5714,
+          "total_pnl_pct": 90.659
+        },
+        "train": {
+          "trades": 57,
+          "pf": 4.1986,
+          "wr": 0.6316,
+          "total_pnl_pct": 86.24
+        },
+        "hold_out": {
+          "trades": 20,
+          "pf": 1.3106,
+          "wr": 0.4,
+          "total_pnl_pct": 4.419
+        }
+      },
+      "macd_early_trend_short": {
+        "all": {
+          "trades": 43,
+          "pf": 3.0979,
+          "wr": 0.6047,
+          "total_pnl_pct": 49.907
+        },
+        "train": {
+          "trades": 32,
+          "pf": 3.9301,
+          "wr": 0.6562,
+          "total_pnl_pct": 45.801
+        },
+        "hold_out": {
+          "trades": 11,
+          "pf": 1.5032,
+          "wr": 0.4545,
+          "total_pnl_pct": 4.105
+        }
+      }
+    }
+  }
+}

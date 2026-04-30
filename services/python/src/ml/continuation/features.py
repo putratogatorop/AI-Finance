@@ -33,7 +33,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -96,7 +96,7 @@ def _atr_array(high: np.ndarray, low: np.ndarray, close: np.ndarray, n: int) -> 
         np.abs(high - prev_close),
         np.abs(low - prev_close),
     ])
-    return pd.Series(tr).rolling(n, min_periods=n).mean().to_numpy()
+    return cast(np.ndarray, pd.Series(tr).rolling(n, min_periods=n).mean().to_numpy())
 
 
 def _argmax_in_window(arr: np.ndarray, window: int) -> np.ndarray:
@@ -189,7 +189,7 @@ class FeatureContext:
     _breadth_4h_panel: pd.Series | None = field(init=False, default=None)
     _per_asset: dict[str, _AssetView] = field(init=False, default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Pre-build BTC view (used by 3 features) and the asset cache will fill lazily.
         btc_sub = self.candles[self.candles["asset"] == self.btc_asset_key]
         if len(btc_sub) == 0:

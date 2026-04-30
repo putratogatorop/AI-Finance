@@ -46,6 +46,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 
 # ── Phase configs (LOCKED — change requires backtest re-citation) ────
@@ -205,7 +206,7 @@ def compute_size(*, current_equity: float, exit_kind: str,
 # ── DB state persistence ─────────────────────────────────────────────
 
 
-def ensure_state_table(engine) -> None:
+def ensure_state_table(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("""
@@ -221,7 +222,7 @@ def ensure_state_table(engine) -> None:
         )
 
 
-def load_state(engine, strategy_group: str) -> SizingState:
+def load_state(engine: Engine, strategy_group: str) -> SizingState:
     """Read phase + rolling PnL window from DB. Initializes P1 row if missing."""
     with engine.connect() as conn:
         row = conn.execute(
@@ -259,7 +260,7 @@ def load_state(engine, strategy_group: str) -> SizingState:
     )
 
 
-def save_state(engine, state: SizingState) -> None:
+def save_state(engine: Engine, state: SizingState) -> None:
     pnl_window = state.recent_pnl[-ROLLING_KELLY_WINDOW:]
     with engine.begin() as conn:
         conn.execute(
@@ -285,7 +286,7 @@ def save_state(engine, state: SizingState) -> None:
         )
 
 
-def record_close(engine, strategy_group: str, closed_pnl_pct: float,
+def record_close(engine: Engine, strategy_group: str, closed_pnl_pct: float,
                   new_equity: float) -> SizingState:
     """Call after a position closes. Updates Kelly window + phase."""
     state = load_state(engine, strategy_group)

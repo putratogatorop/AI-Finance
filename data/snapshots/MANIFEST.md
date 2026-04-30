@@ -16,3 +16,4 @@ See `docs/backtest-protocol.md` for usage.
 | 2026-04-23 | cross-agent (SMA)          | PASS   | fresh subagent with only protocol+script reproduced committed metrics.json byte-for-byte |
 | 2026-04-24 | 20552035 | 9a21151142bcf8e022e2cce23b929e7c15198fd2f54d19e6d8836d290f3f29ac | 667 | e273d296f6213149966f4c168c508cb197668991f0e06acf22243be75040d9bd | post-backfill: +32 pairs incl CHIP HOLO GUN; 21 futures-only still missing |
 | 2026-04-01 | 19021078 | ee67165ca0ac41ad5320303029509cdc68e28ded700d875eb4b8cec5aeb62946 | 672 | 6cda0add4249195789ed48a2ea5998fddfc3c75a94f903a177c9863310067f6d | local full-history export on fresh Mac |
+| 2026-04-27 | 854829 | 6422cb3f44f2a7e1e23714b281a001a9f9f9edaf5fb539373044c7bcebce00d0 | 680 | 729456e5699f1d2e23938175b5a87419a9cca9bab783119c612760740f829658 | Gate.io public API recent ~95d window; already used by run 52dc5d18 |

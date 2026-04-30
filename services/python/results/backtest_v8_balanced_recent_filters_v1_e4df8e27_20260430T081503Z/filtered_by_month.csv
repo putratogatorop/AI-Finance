@@ -1,0 +1,16 @@
+month,detector,trades,pf,wr,total_pnl_pct
+2026-01,macd_early_trend_short,103,5.248,76.7,243.62
+2026-01,macd_pullback_long,161,1.265,47.8,60.01
+2026-01,macd_pullback_short,103,5.248,76.7,243.62
+2026-01,rsi_recovery_long,35,7.306,77.1,99.9
+2026-02,macd_early_trend_short,86,3.075,65.1,164.07
+2026-02,macd_pullback_long,460,1.772,42.4,516.61
+2026-02,macd_pullback_short,149,2.211,59.1,169.05
+2026-02,rsi_recovery_long,2,inf,100.0,18.98
+2026-03,macd_early_trend_short,124,2.285,63.7,111.7
+2026-03,macd_pullback_long,783,1.326,42.3,327.02
+2026-03,macd_pullback_short,169,2.196,62.1,152.55
+2026-03,rsi_recovery_long,2,0.318,50.0,-3.57
+2026-04,macd_early_trend_short,62,1.587,53.2,35.75
+2026-04,macd_pullback_long,772,1.534,52.3,603.56
+2026-04,macd_pullback_short,133,1.664,55.6,83.6

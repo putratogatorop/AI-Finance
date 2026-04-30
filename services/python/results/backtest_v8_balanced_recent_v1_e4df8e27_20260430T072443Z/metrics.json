@@ -1,0 +1,272 @@
+{
+  "snapshot_date": "2026-04-27",
+  "hold_out_start": "2026-03-28",
+  "ship_floor_pf": 1.3,
+  "n_eligible_assets": 100,
+  "funnel": {
+    "macd_pullback_short": 689,
+    "macd_early_trend_short": 411,
+    "macd_pullback_long": 3184,
+    "rsi_recovery_long": 39
+  },
+  "by_detector": {
+    "macd_pullback_short": {
+      "all": {
+        "trades": 689,
+        "pf": 2.6631,
+        "wr": 0.5356,
+        "total_pnl_pct": 856.383,
+        "avg_pnl_pct": 1.2429,
+        "median_hold_bars": 22
+      },
+      "train": {
+        "trades": 501,
+        "pf": 3.3495,
+        "wr": 0.5968,
+        "total_pnl_pct": 814.37,
+        "avg_pnl_pct": 1.6255,
+        "median_hold_bars": 22
+      },
+      "hold_out": {
+        "trades": 188,
+        "pf": 1.2496,
+        "wr": 0.3723,
+        "total_pnl_pct": 42.012,
+        "avg_pnl_pct": 0.2235,
+        "median_hold_bars": 21
+      },
+      "passes_ship_floor_holdout": false
+    },
+    "macd_early_trend_short": {
+      "all": {
+        "trades": 411,
+        "pf": 2.7576,
+        "wr": 0.562,
+        "total_pnl_pct": 533.06,
+        "avg_pnl_pct": 1.297,
+        "median_hold_bars": 21
+      },
+      "train": {
+        "trades": 325,
+        "pf": 3.3428,
+        "wr": 0.6154,
+        "total_pnl_pct": 518.309,
+        "avg_pnl_pct": 1.5948,
+        "median_hold_bars": 20
+      },
+      "hold_out": {
+        "trades": 86,
+        "pf": 1.1798,
+        "wr": 0.3605,
+        "total_pnl_pct": 14.75,
+        "avg_pnl_pct": 0.1715,
+        "median_hold_bars": 21
+      },
+      "passes_ship_floor_holdout": false
+    },
+    "macd_pullback_long": {
+      "all": {
+        "trades": 3184,
+        "pf": 1.4604,
+        "wr": 0.3678,
+        "total_pnl_pct": 1787.724,
+        "avg_pnl_pct": 0.5615,
+        "median_hold_bars": 16
+      },
+      "train": {
+        "trades": 1991,
+        "pf": 1.4139,
+        "wr": 0.3446,
+        "total_pnl_pct": 977.122,
+        "avg_pnl_pct": 0.4908,
+        "median_hold_bars": 16
+      },
+      "hold_out": {
+        "trades": 1193,
+        "pf": 1.5326,
+        "wr": 0.4065,
+        "total_pnl_pct": 810.602,
+        "avg_pnl_pct": 0.6795,
+        "median_hold_bars": 14
+      },
+      "passes_ship_floor_holdout": true
+    },
+    "rsi_recovery_long": {
+      "all": {
+        "trades": 39,
+        "pf": 6.1384,
+        "wr": 0.7179,
+        "total_pnl_pct": 110.001,
+        "avg_pnl_pct": 2.8205,
+        "median_hold_bars": 11
+      },
+      "train": {
+        "trades": 39,
+        "pf": 6.1384,
+        "wr": 0.7179,
+        "total_pnl_pct": 110.001,
+        "avg_pnl_pct": 2.8205,
+        "median_hold_bars": 11
+      },
+      "hold_out": {
+        "trades": 0,
+        "pf": 0.0,
+        "wr": 0.0,
+        "total_pnl_pct": 0.0
+      },
+      "passes_ship_floor_holdout": false
+    }
+  },
+  "by_month": [
+    {
+      "month": "2026-01",
+      "detector": "macd_early_trend_short",
+      "trades": 121,
+      "pf": 4.393,
+      "wr": 64.5,
+      "total_pnl_pct": 248.14,
+      "avg_pnl_pct": 2.051,
+      "median_hold_bars": 20
+    },
+    {
+      "month": "2026-01",
+      "detector": "macd_pullback_long",
+      "trades": 196,
+      "pf": 1.412,
+      "wr": 39.8,
+      "total_pnl_pct": 101.84,
+      "avg_pnl_pct": 0.52,
+      "median_hold_bars": 19
+    },
+    {
+      "month": "2026-01",
+      "detector": "macd_pullback_short",
+      "trades": 121,
+      "pf": 4.393,
+      "wr": 64.5,
+      "total_pnl_pct": 248.14,
+      "avg_pnl_pct": 2.051,
+      "median_hold_bars": 20
+    },
+    {
+      "month": "2026-01",
+      "detector": "rsi_recovery_long",
+      "trades": 35,
+      "pf": 6.853,
+      "wr": 71.4,
+      "total_pnl_pct": 94.6,
+      "avg_pnl_pct": 2.703,
+      "median_hold_bars": 11
+    },
+    {
+      "month": "2026-02",
+      "detector": "macd_early_trend_short",
+      "trades": 86,
+      "pf": 2.84,
+      "wr": 58.1,
+      "total_pnl_pct": 149.4,
+      "avg_pnl_pct": 1.737,
+      "median_hold_bars": 20
+    },
+    {
+      "month": "2026-02",
+      "detector": "macd_pullback_long",
+      "trades": 737,
+      "pf": 1.59,
+      "wr": 33.9,
+      "total_pnl_pct": 544.42,
+      "avg_pnl_pct": 0.739,
+      "median_hold_bars": 16
+    },
+    {
+      "month": "2026-02",
+      "detector": "macd_pullback_short",
+      "trades": 224,
+      "pf": 3.378,
+      "wr": 58.5,
+      "total_pnl_pct": 407.33,
+      "avg_pnl_pct": 1.818,
+      "median_hold_bars": 23
+    },
+    {
+      "month": "2026-02",
+      "detector": "rsi_recovery_long",
+      "trades": 2,
+      "pf": Infinity,
+      "wr": 100.0,
+      "total_pnl_pct": 18.98,
+      "avg_pnl_pct": 9.488,
+      "median_hold_bars": 7
+    },
+    {
+      "month": "2026-03",
+      "detector": "macd_early_trend_short",
+      "trades": 142,
+      "pf": 2.273,
+      "wr": 55.6,
+      "total_pnl_pct": 113.84,
+      "avg_pnl_pct": 0.802,
+      "median_hold_bars": 20
+    },
+    {
+      "month": "2026-03",
+      "detector": "macd_pullback_long",
+      "trades": 1116,
+      "pf": 1.271,
+      "wr": 34.1,
+      "total_pnl_pct": 341.68,
+      "avg_pnl_pct": 0.306,
+      "median_hold_bars": 17
+    },
+    {
+      "month": "2026-03",
+      "detector": "macd_pullback_short",
+      "trades": 191,
+      "pf": 2.125,
+      "wr": 51.8,
+      "total_pnl_pct": 148.76,
+      "avg_pnl_pct": 0.779,
+      "median_hold_bars": 18
+    },
+    {
+      "month": "2026-03",
+      "detector": "rsi_recovery_long",
+      "trades": 2,
+      "pf": 0.318,
+      "wr": 50.0,
+      "total_pnl_pct": -3.57,
+      "avg_pnl_pct": -1.787,
+      "median_hold_bars": 6
+    },
+    {
+      "month": "2026-04",
+      "detector": "macd_early_trend_short",
+      "trades": 62,
+      "pf": 1.365,
+      "wr": 38.7,
+      "total_pnl_pct": 21.68,
+      "avg_pnl_pct": 0.35,
+      "median_hold_bars": 26
+    },
+    {
+      "month": "2026-04",
+      "detector": "macd_pullback_long",
+      "trades": 1135,
+      "pf": 1.551,
+      "wr": 40.8,
+      "total_pnl_pct": 799.78,
+      "avg_pnl_pct": 0.705,
+      "median_hold_bars": 14
+    },
+    {
+      "month": "2026-04",
+      "detector": "macd_pullback_short",
+      "trades": 153,
+      "pf": 1.377,
+      "wr": 39.9,
+      "total_pnl_pct": 52.15,
+      "avg_pnl_pct": 0.341,
+      "median_hold_bars": 23
+    }
+  ]
+}

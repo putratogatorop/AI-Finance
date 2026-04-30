@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.ml.models.base import BaseModel, HorizonPrediction, ModelPrediction
 
 
-class _LSTMNetwork(nn.Module):
+class _LSTMNetwork(nn.Module):  # type: ignore[misc,unused-ignore]
     """PyTorch LSTM network for multi-output regression."""
 
     def __init__(

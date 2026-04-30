@@ -15,6 +15,7 @@ time so the backtest reproduces exactly. See `default_sizing_config()`.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class SizingConfig:
     floor: float = 0.0
     cap: float = 1.5
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 

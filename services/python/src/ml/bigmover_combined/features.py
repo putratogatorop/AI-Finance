@@ -218,7 +218,7 @@ class FeatureContext:
     _ret_4h_panel: pd.DataFrame | None = field(init=False, default=None)
     _per_asset: dict[str, _AssetView] = field(init=False, default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # BTC view (per-asset rolling).
         btc_sub = self.candles[self.candles["asset"] == self.btc_asset_key]
         if len(btc_sub) == 0:

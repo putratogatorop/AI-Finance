@@ -50,7 +50,7 @@ def _resample_close_daily(df: pd.DataFrame, ts_col: str) -> pd.Series:
     return daily["close"]
 
 
-def _btc_above_ema20_at(close_series: pd.Series, ts) -> bool | None:
+def _btc_above_ema20_at(close_series: pd.Series, ts: Any) -> bool | None:
     """Is BTC daily close > 20d EMA at the given timestamp?
 
     `ts` may be any datetime-like; we pick the daily row at-or-before that ts.
@@ -161,9 +161,9 @@ def compute_short_regime(
 ) -> bool:
     """Drop-in replacement for the inline `compute_regime()` in
     `live_scanner_v2.py`. Returns True iff a SHORT signal is allowed."""
-    return regime_state_now(
+    return bool(regime_state_now(
         candle_cache, btc_df, ts_col=ts_col, btc_key=btc_key
-    )["allows_short"]
+    )["allows_short"])
 
 
 def compute_long_regime(
@@ -175,9 +175,9 @@ def compute_long_regime(
 ) -> bool:
     """Drop-in replacement for the inline `compute_regime()` in
     `live_scanner_long_v2.py`. Returns True iff a LONG signal is allowed."""
-    return regime_state_now(
+    return bool(regime_state_now(
         candle_cache, btc_df, ts_col=ts_col, btc_key=btc_key
-    )["allows_long"]
+    )["allows_long"])
 
 
 def regime_history(

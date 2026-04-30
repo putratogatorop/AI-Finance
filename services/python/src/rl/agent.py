@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.distributions import Normal
 
 
-class LSTMPPOAgent(nn.Module):
+class LSTMPPOAgent(nn.Module):  # type: ignore[misc,unused-ignore]
     """Actor-critic network with LSTM backbone for PPO training."""
 
     def __init__(
@@ -92,7 +92,7 @@ class LSTMPPOAgent(nn.Module):
         return cast(Tensor, lstm_out[:, -1, :])
 
     # ------------------------------------------------------------------
-    @torch.no_grad()
+    @torch.no_grad()  # type: ignore[misc,unused-ignore]
     def act(
         self,
         obs: np.ndarray[Any, np.dtype[Any]],
@@ -120,9 +120,9 @@ class LSTMPPOAgent(nn.Module):
         if deterministic:
             action = action_mean
         else:
-            action = dist.sample()  # type: ignore[no-untyped-call]
+            action = dist.sample()  # type: ignore[no-untyped-call,unused-ignore]
 
-        log_prob = dist.log_prob(action).sum().item()  # type: ignore[no-untyped-call]
+        log_prob = dist.log_prob(action).sum().item()  # type: ignore[no-untyped-call,unused-ignore]
         value = self.critic(h).squeeze().item()
 
         # Clamp outputs per triple (score, sl, tp)
@@ -166,9 +166,9 @@ class LSTMPPOAgent(nn.Module):
         action_mean = torch.nan_to_num(action_mean, nan=0.0)
         dist = Normal(action_mean, action_std)  # type: ignore[no-untyped-call,unused-ignore]
 
-        log_probs = dist.log_prob(action_batch).sum(dim=-1)  # type: ignore[no-untyped-call]  # (batch,)
+        log_probs = dist.log_prob(action_batch).sum(dim=-1)  # type: ignore[no-untyped-call,unused-ignore]  # (batch,)
         values = self.critic(h).squeeze(-1)                   # (batch,)
-        entropy = dist.entropy().mean()  # type: ignore[no-untyped-call]  # scalar
+        entropy = dist.entropy().mean()  # type: ignore[no-untyped-call,unused-ignore]  # scalar
 
         # Restore hidden
         self.hidden = saved_hidden

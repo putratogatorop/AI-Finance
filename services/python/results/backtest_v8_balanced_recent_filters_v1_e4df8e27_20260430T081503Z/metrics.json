@@ -1,0 +1,226 @@
+{
+  "snapshot_date": "2026-04-27",
+  "hold_out_start": "2026-03-28",
+  "filters": {
+    "A_breadth_cap_pct": 0.15,
+    "B_min_sl_pct": 0.015
+  },
+  "baseline": {
+    "macd_pullback_short": {
+      "all": {
+        "trades": 689,
+        "pf": 2.6631,
+        "wr": 0.5356,
+        "total_pnl_pct": 856.383,
+        "avg_pnl_pct": 1.2429,
+        "avg_hold_bars": 22
+      },
+      "train": {
+        "trades": 501,
+        "pf": 3.3495,
+        "wr": 0.5968,
+        "total_pnl_pct": 814.37,
+        "avg_pnl_pct": 1.6255,
+        "avg_hold_bars": 22
+      },
+      "hold_out": {
+        "trades": 188,
+        "pf": 1.2496,
+        "wr": 0.3723,
+        "total_pnl_pct": 42.012,
+        "avg_pnl_pct": 0.2235,
+        "avg_hold_bars": 21
+      },
+      "passes_ship_floor_holdout": false
+    },
+    "macd_early_trend_short": {
+      "all": {
+        "trades": 411,
+        "pf": 2.7576,
+        "wr": 0.562,
+        "total_pnl_pct": 533.06,
+        "avg_pnl_pct": 1.297,
+        "avg_hold_bars": 21
+      },
+      "train": {
+        "trades": 325,
+        "pf": 3.3428,
+        "wr": 0.6154,
+        "total_pnl_pct": 518.309,
+        "avg_pnl_pct": 1.5948,
+        "avg_hold_bars": 20
+      },
+      "hold_out": {
+        "trades": 86,
+        "pf": 1.1798,
+        "wr": 0.3605,
+        "total_pnl_pct": 14.75,
+        "avg_pnl_pct": 0.1715,
+        "avg_hold_bars": 21
+      },
+      "passes_ship_floor_holdout": false
+    },
+    "macd_pullback_long": {
+      "all": {
+        "trades": 3184,
+        "pf": 1.4604,
+        "wr": 0.3678,
+        "total_pnl_pct": 1787.724,
+        "avg_pnl_pct": 0.5615,
+        "avg_hold_bars": 16
+      },
+      "train": {
+        "trades": 1991,
+        "pf": 1.4139,
+        "wr": 0.3446,
+        "total_pnl_pct": 977.122,
+        "avg_pnl_pct": 0.4908,
+        "avg_hold_bars": 16
+      },
+      "hold_out": {
+        "trades": 1193,
+        "pf": 1.5326,
+        "wr": 0.4065,
+        "total_pnl_pct": 810.602,
+        "avg_pnl_pct": 0.6795,
+        "avg_hold_bars": 14
+      },
+      "passes_ship_floor_holdout": true
+    },
+    "rsi_recovery_long": {
+      "all": {
+        "trades": 39,
+        "pf": 6.1384,
+        "wr": 0.7179,
+        "total_pnl_pct": 110.001,
+        "avg_pnl_pct": 2.8205,
+        "avg_hold_bars": 11
+      },
+      "train": {
+        "trades": 39,
+        "pf": 6.1384,
+        "wr": 0.7179,
+        "total_pnl_pct": 110.001,
+        "avg_pnl_pct": 2.8205,
+        "avg_hold_bars": 11
+      },
+      "hold_out": {
+        "trades": 0,
+        "pf": 0.0,
+        "wr": 0.0,
+        "total_pnl_pct": 0.0,
+        "avg_hold_bars": 0
+      },
+      "passes_ship_floor_holdout": false
+    }
+  },
+  "filtered": {
+    "macd_pullback_short": {
+      "all": {
+        "trades": 554,
+        "pf": 2.4404,
+        "wr": 0.6245,
+        "total_pnl_pct": 648.827,
+        "avg_pnl_pct": 1.1712,
+        "avg_hold_bars": 24
+      },
+      "train": {
+        "trades": 386,
+        "pf": 2.9169,
+        "wr": 0.6528,
+        "total_pnl_pct": 563.42,
+        "avg_pnl_pct": 1.4596,
+        "avg_hold_bars": 24
+      },
+      "hold_out": {
+        "trades": 168,
+        "pf": 1.5456,
+        "wr": 0.5595,
+        "total_pnl_pct": 85.408,
+        "avg_pnl_pct": 0.5084,
+        "avg_hold_bars": 23
+      },
+      "passes_ship_floor_holdout": true
+    },
+    "macd_early_trend_short": {
+      "all": {
+        "trades": 375,
+        "pf": 2.9532,
+        "wr": 0.6587,
+        "total_pnl_pct": 555.15,
+        "avg_pnl_pct": 1.4804,
+        "avg_hold_bars": 26
+      },
+      "train": {
+        "trades": 289,
+        "pf": 3.5963,
+        "wr": 0.6955,
+        "total_pnl_pct": 518.792,
+        "avg_pnl_pct": 1.7951,
+        "avg_hold_bars": 25
+      },
+      "hold_out": {
+        "trades": 86,
+        "pf": 1.4307,
+        "wr": 0.5349,
+        "total_pnl_pct": 36.358,
+        "avg_pnl_pct": 0.4228,
+        "avg_hold_bars": 29
+      },
+      "passes_ship_floor_holdout": true
+    },
+    "macd_pullback_long": {
+      "all": {
+        "trades": 2176,
+        "pf": 1.4977,
+        "wr": 0.4628,
+        "total_pnl_pct": 1507.201,
+        "avg_pnl_pct": 0.6926,
+        "avg_hold_bars": 22
+      },
+      "train": {
+        "trades": 1362,
+        "pf": 1.4855,
+        "wr": 0.4273,
+        "total_pnl_pct": 892.225,
+        "avg_pnl_pct": 0.6551,
+        "avg_hold_bars": 22
+      },
+      "hold_out": {
+        "trades": 814,
+        "pf": 1.5167,
+        "wr": 0.5221,
+        "total_pnl_pct": 614.975,
+        "avg_pnl_pct": 0.7555,
+        "avg_hold_bars": 22
+      },
+      "passes_ship_floor_holdout": true
+    },
+    "rsi_recovery_long": {
+      "all": {
+        "trades": 39,
+        "pf": 6.4678,
+        "wr": 0.7692,
+        "total_pnl_pct": 115.299,
+        "avg_pnl_pct": 2.9564,
+        "avg_hold_bars": 12
+      },
+      "train": {
+        "trades": 39,
+        "pf": 6.4678,
+        "wr": 0.7692,
+        "total_pnl_pct": 115.299,
+        "avg_pnl_pct": 2.9564,
+        "avg_hold_bars": 12
+      },
+      "hold_out": {
+        "trades": 0,
+        "pf": 0.0,
+        "wr": 0.0,
+        "total_pnl_pct": 0.0,
+        "avg_hold_bars": 0
+      },
+      "passes_ship_floor_holdout": false
+    }
+  }
+}
