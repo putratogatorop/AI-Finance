@@ -452,6 +452,22 @@ def ensure_paper_table(engine):
         conn.execute(text(
             "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS exit_kind VARCHAR(8)"
         ))
+        # v8 BGM baseline counterfactual (added 2026-05-01).
+        # notional_usd_unscaled = decision.notional_usd BEFORE the v8 classifier
+        # sizing multiplier. Lets the dashboard recompute a "no-classifier"
+        # equity curve to make BGM's contribution visible as a PnL gap.
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS notional_usd_unscaled DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS pnl_usd_unscaled DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS fees_usd_unscaled DOUBLE PRECISION"
+        ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS cls_multiplier DOUBLE PRECISION"
+        ))
 
 
 # ── Paper trade logic ────────────────────────────────────────────────
@@ -870,10 +886,12 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
             (source_table, source_id, threshold, strategy, symbol, direction, ml_prob,
              entry_time, entry_price, position_usd, tp_price, sl_price, status,
              regime_allowed, venue,
-             atr14_at_entry, btc_score, pos_scale, exit_kind)
+             atr14_at_entry, btc_score, pos_scale, exit_kind,
+             notional_usd_unscaled, cls_multiplier)
             VALUES (:st, :sid, :th, :strat, :sym, :dir, :ml, :et, :ep, :pos,
                     :tp, :sl, 'open', NULL, :venue,
-                    :atr, :bs, :psc, :ek)
+                    :atr, :bs, :psc, :ek,
+                    :nuu, :cmu)
             ON CONFLICT (source_table, source_id, threshold, strategy) DO NOTHING
         """), {
             "st": sig.source_table, "sid": sig.source_id,
@@ -885,6 +903,10 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
             "atr": sig.atr14_at_entry, "bs": sig.btc_score,
             "psc": adjusted_notional_pct,  # store classifier-adjusted notional_pct as pos_scale
             "ek": account["exit"],
+            # BGM baseline counterfactual: store the v6 base notional BEFORE the
+            # classifier multiplier so the close path can compute pnl_usd_unscaled.
+            "nuu": float(decision.notional_usd),
+            "cmu": float(cls_multiplier),
         })
 
 
@@ -981,13 +1003,14 @@ def check_and_close_trades(engine):
         trades = conn.execute(text("""
             SELECT id, symbol, direction, entry_price, entry_time,
                    position_usd, tp_price, sl_price, threshold, peak_pnl_pct,
-                   strategy
+                   strategy, notional_usd_unscaled
             FROM paper_trades WHERE status = 'open'
         """)).fetchall()
 
     for t in trades:
         (trade_id, symbol, direction, entry, entry_time,
-         pos_usd, tp, sl, threshold, peak_pnl, strategy) = t
+         pos_usd, tp, sl, threshold, peak_pnl, strategy,
+         notional_usd_unscaled) = t
         peak_pnl = float(peak_pnl or 0.0)
         strategy = strategy or V2_STRATEGY
 
@@ -1073,6 +1096,17 @@ def check_and_close_trades(engine):
         pnl_usd = pos_usd * pnl_pct - fees
         equity_after = current_equity(engine, threshold, strategy) + pnl_usd
 
+        # BGM baseline counterfactual (v8 trades only — non-v8 rows have
+        # notional_usd_unscaled IS NULL and stay NULL on the unscaled columns).
+        # Math is exact for sizing-mode because PnL is linear in position size.
+        if notional_usd_unscaled is not None:
+            nuu = float(notional_usd_unscaled)
+            fees_unscaled: float | None = nuu * FEE_RATE * 2
+            pnl_usd_unscaled: float | None = nuu * pnl_pct - fees_unscaled
+        else:
+            fees_unscaled = None
+            pnl_usd_unscaled = None
+
         status = "won" if pnl_usd > 0 else ("lost" if exit_reason == "stop_loss" else "timeout")
 
         with engine.begin() as conn:
@@ -1080,12 +1114,14 @@ def check_and_close_trades(engine):
                 UPDATE paper_trades
                 SET status = :st, exit_time = :et, exit_price = :ep,
                     exit_reason = :er, pnl_pct = :pp, pnl_usd = :pu,
-                    fees_usd = :f, equity_after = :eq
+                    fees_usd = :f, equity_after = :eq,
+                    pnl_usd_unscaled = :puu, fees_usd_unscaled = :fuu
                 WHERE id = :id
             """), {
                 "st": status, "et": datetime.now(UTC),
                 "ep": exit_price, "er": exit_reason,
                 "pp": pnl_pct, "pu": pnl_usd, "f": fees, "eq": equity_after,
+                "puu": pnl_usd_unscaled, "fuu": fees_unscaled,
                 "id": trade_id,
             })
 

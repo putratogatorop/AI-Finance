@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { SystemStatus } from "@/components/system-status";
@@ -64,7 +65,10 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
   // Per-strategy summary, scoped to v8 trades. The classifier writes its
   // probability score to ml_prob (replacing the old sentinel 1.0). We
   // distinguish "scored" trades (ml_prob != 1.0) from pre-classifier
-  // legacy rows (ml_prob = 1.0).
+  // legacy rows (ml_prob = 1.0). total_pnl is LIVE (classifier-sized).
+  // total_pnl_baseline is the no-classifier counterfactual, computed from
+  // pnl_usd_unscaled (NULL → COALESCE to pnl_usd, which equals the live
+  // value for pre-baseline-column rows). The gap = BGM contribution.
   let strategySummary: any[] = [];
   try {
     strategySummary = await prisma.$queryRawUnsafe(`
@@ -82,6 +86,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
             / ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0), 0)),
           0)::numeric, 2) AS pf,
         ROUND(COALESCE(SUM(pnl_usd), 0)::numeric, 2) AS total_pnl,
+        ROUND(COALESCE(SUM(COALESCE(pnl_usd_unscaled, pnl_usd)), 0)::numeric, 2) AS total_pnl_baseline,
         ROUND((${STARTING_EQUITY} + COALESCE(SUM(pnl_usd), 0))::numeric, 2) AS equity,
         ROUND(AVG(ml_prob) FILTER (WHERE ml_prob != 1.0)::numeric, 3) AS avg_score,
         ROUND(AVG(pos_scale) FILTER (WHERE ml_prob != 1.0)::numeric, 3) AS avg_size_pct,
@@ -100,7 +105,16 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
   const totalTrades = strategySummary.reduce((acc: number, r: any) => acc + Number(r.trades_total || 0), 0);
   const totalScored = strategySummary.reduce((acc: number, r: any) => acc + Number(r.trades_scored || 0), 0);
   const totalPnl = strategySummary.reduce((acc: number, r: any) => acc + Number(r.total_pnl || 0), 0);
-  const portfolioEquity = STARTING_EQUITY * V8_ML_STRATEGIES.length + totalPnl;
+  const totalPnlBaseline = strategySummary.reduce(
+    (acc: number, r: any) => acc + Number(r.total_pnl_baseline || 0),
+    0,
+  );
+  // BGM contribution = live PnL minus the no-classifier counterfactual.
+  // Positive = sizing helped; negative = sizing hurt.
+  const bgmLift = totalPnl - totalPnlBaseline;
+  const seedTotal = STARTING_EQUITY * V8_ML_STRATEGIES.length;
+  const bgmLiftPctOfSeed = seedTotal > 0 ? (bgmLift / seedTotal) * 100 : 0;
+  const portfolioEquity = seedTotal + totalPnl;
 
   // Open positions — scoped to the selected strategy (or all v8)
   const stratClause =
@@ -175,7 +189,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
       </div>
 
       {/* Portfolio KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KPI
           label="Total v8 Trades"
           value={`${totalTrades}`}
@@ -183,22 +197,33 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
           hint={`${totalScored} scored by classifier`}
         />
         <KPI
-          label="ML-Scored Trades"
-          value={`${totalScored}`}
-          color="brand"
-          hint="ml_prob ≠ 1.0 (sentinel)"
-        />
-        <KPI
-          label="Portfolio PnL"
+          label="Portfolio PnL (Live)"
           value={`$${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}`}
           color={totalPnl >= 0 ? "green" : "red"}
-          hint="combined across all 4 v8 accounts"
+          hint="with BGM sizing"
+        />
+        <KPI
+          label="Portfolio PnL (Baseline)"
+          value={`$${totalPnlBaseline >= 0 ? "+" : ""}${totalPnlBaseline.toFixed(2)}`}
+          color={totalPnlBaseline >= 0 ? "green" : "red"}
+          hint={
+            <>
+              cls_multiplier = 1.0 ·{" "}
+              <Link href="/paper-v8" className="underline hover:text-white">/paper-v8</Link>
+            </>
+          }
+        />
+        <KPI
+          label="BGM Lift"
+          value={`${bgmLift >= 0 ? "+" : ""}$${bgmLift.toFixed(2)}`}
+          color={bgmLift >= 0 ? "green" : "red"}
+          hint={`${bgmLift >= 0 ? "+" : ""}${bgmLiftPctOfSeed.toFixed(2)}% of seed (live − baseline)`}
         />
         <KPI
           label="Portfolio Equity"
           value={`$${portfolioEquity.toFixed(2)}`}
-          color={portfolioEquity >= STARTING_EQUITY * V8_ML_STRATEGIES.length ? "green" : "red"}
-          hint={`seed $${(STARTING_EQUITY * V8_ML_STRATEGIES.length).toFixed(0)} (4 × $${STARTING_EQUITY})`}
+          color={portfolioEquity >= seedTotal ? "green" : "red"}
+          hint={`seed $${seedTotal.toFixed(0)} (4 × $${STARTING_EQUITY})`}
         />
       </div>
 
@@ -536,7 +561,7 @@ function KPI({
 }: {
   label: string;
   value: string;
-  hint?: string;
+  hint?: ReactNode;
   color?: string;
 }) {
   const c =

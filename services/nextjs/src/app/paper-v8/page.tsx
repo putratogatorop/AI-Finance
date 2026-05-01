@@ -56,7 +56,12 @@ export default async function PaperV8Page({ searchParams }: Props) {
   const selectedStrategy = params.strategy || "all";
   const page = Math.max(1, parseInt(params.page || "1") || 1);
 
-  // Per-strategy summary
+  // Per-strategy summary — BASELINE counterfactual (cls_multiplier = 1.0).
+  // Uses COALESCE(pnl_usd_unscaled, pnl_usd): for v8 trades opened after
+  // the BGM baseline column ships, pnl_usd_unscaled is the no-classifier PnL;
+  // for legacy rows (NULL) we fall back to pnl_usd, which by definition was
+  // unscaled if no classifier was applied. Win/loss buckets use the same
+  // baseline value so WR and PF reflect the no-classifier world.
   let strategySummary: any[] = [];
   try {
     strategySummary = await prisma.$queryRawUnsafe(`
@@ -64,16 +69,17 @@ export default async function PaperV8Page({ searchParams }: Props) {
         strategy,
         COUNT(*)::int AS trades,
         COUNT(*) FILTER (WHERE status='open')::int AS open_n,
-        COUNT(*) FILTER (WHERE status='won')::int AS won_n,
+        COUNT(*) FILTER (WHERE status='won' AND COALESCE(pnl_usd_unscaled, pnl_usd) > 0)::int AS won_n,
         COUNT(*) FILTER (WHERE status IN ('lost','timeout'))::int AS loss_n,
-        ROUND((100.0 * COUNT(*) FILTER (WHERE status='won') /
+        ROUND((100.0 * COUNT(*) FILTER (WHERE COALESCE(pnl_usd_unscaled, pnl_usd) > 0
+                                          AND status IN ('won','lost','timeout')) /
                NULLIF(COUNT(*) FILTER (WHERE status IN ('won','lost','timeout')), 0))::numeric, 1) AS wr,
         ROUND(COALESCE(
-          SUM(pnl_usd) FILTER (WHERE pnl_usd>0)
-            / ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0), 0)),
+          SUM(COALESCE(pnl_usd_unscaled, pnl_usd)) FILTER (WHERE COALESCE(pnl_usd_unscaled, pnl_usd) > 0)
+            / ABS(NULLIF(SUM(COALESCE(pnl_usd_unscaled, pnl_usd)) FILTER (WHERE COALESCE(pnl_usd_unscaled, pnl_usd) <= 0), 0)),
           0)::numeric, 2) AS pf,
-        ROUND(COALESCE(SUM(pnl_usd), 0)::numeric, 2) AS total_pnl,
-        ROUND((${STARTING_EQUITY} + COALESCE(SUM(pnl_usd), 0))::numeric, 2) AS equity,
+        ROUND(COALESCE(SUM(COALESCE(pnl_usd_unscaled, pnl_usd)), 0)::numeric, 2) AS total_pnl,
+        ROUND((${STARTING_EQUITY} + COALESCE(SUM(COALESCE(pnl_usd_unscaled, pnl_usd)), 0))::numeric, 2) AS equity,
         MAX(entry_time) AS latest_entry
       FROM paper_trades
       WHERE strategy LIKE 'v8_%' AND threshold = ${V8_SENTINEL_THRESHOLD}
@@ -132,9 +138,18 @@ export default async function PaperV8Page({ searchParams }: Props) {
         AND threshold = ${V8_SENTINEL_THRESHOLD} ${stratClause}
     `);
     totalClosed = cr[0]?.n || 0;
+    // BASELINE view: also pull pnl_usd_unscaled and a per-strategy cumulative
+    // baseline equity (window function evaluates over the full WHERE-matched
+    // set, not the LIMIT'd page, so the running total is correct across pages).
     closedTrades = await prisma.$queryRawUnsafe(`
       SELECT id, strategy, symbol, direction, entry_time, exit_time, entry_price, exit_price,
-             position_usd, pnl_pct, pnl_usd, exit_reason, equity_after, pos_scale, exit_kind
+             position_usd, pnl_pct, pnl_usd, pnl_usd_unscaled, exit_reason, equity_after,
+             pos_scale, exit_kind,
+             ${STARTING_EQUITY} + SUM(COALESCE(pnl_usd_unscaled, pnl_usd))
+               OVER (PARTITION BY strategy
+                     ORDER BY exit_time NULLS LAST
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+               AS equity_after_baseline
       FROM paper_trades
       WHERE status IN ('won','lost','timeout')
         AND threshold = ${V8_SENTINEL_THRESHOLD} ${stratClause}
@@ -150,21 +165,24 @@ export default async function PaperV8Page({ searchParams }: Props) {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">
-            Paper Trading — v8 BALANCED{" "}
+            Paper Trading — v8 BALANCED · pre-classifier baseline{" "}
             <span className="text-sm font-normal text-yellow-400">DRY-RUN · No real orders</span>
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            4-detector portfolio · portfolio wf_p5&nbsp;1.486 · holdout PF&nbsp;1.96.
-            Starting equity ${STARTING_EQUITY.toFixed(2)} per account · phase-switch ATR sizing (v6).
-            Source:{" "}
-            <code className="text-slate-300">
-              scanner_signals_macd_pullback_short + _early_trend_short + _pullback_long + _rsi_recovery_long
-            </code>
+            Counterfactual PnL with the v8 classifier sizing forced to{" "}
+            <code className="text-slate-300">cls_multiplier = 1.0</code>. Same trades as{" "}
+            <Link href="/paper-v8-ml" className="underline hover:text-white">/paper-v8-ml</Link>;
+            the gap between this page and that one is BGM&apos;s contribution.
+            4-detector portfolio · portfolio wf_p5&nbsp;1.486 · holdout PF&nbsp;1.96. Starting equity{" "}
+            ${STARTING_EQUITY.toFixed(2)} per account · phase-switch ATR sizing (v6).
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/paper-v8-ml" className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700">
+            v8 + BGM →
+          </Link>
           <Link href="/paper-d1e" className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700">
-            ← D1e (Phase 17)
+            D1e (Phase 17)
           </Link>
           <Link href="/paper" className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700">
             v2 multi-threshold
@@ -445,9 +463,9 @@ export default async function PaperV8Page({ searchParams }: Props) {
                     {(Number(t.pnl_pct) * 100).toFixed(2)}%
                   </td>
                   <td className={`px-3 py-1.5 text-right font-mono ${
-                    Number(t.pnl_usd) >= 0 ? "text-green-400" : "text-red-400"
+                    Number(t.pnl_usd_unscaled ?? t.pnl_usd) >= 0 ? "text-green-400" : "text-red-400"
                   }`}>
-                    {Number(t.pnl_usd) > 0 ? "+" : ""}${Number(t.pnl_usd).toFixed(2)}
+                    {Number(t.pnl_usd_unscaled ?? t.pnl_usd) > 0 ? "+" : ""}${Number(t.pnl_usd_unscaled ?? t.pnl_usd).toFixed(2)}
                   </td>
                   <td className="px-3 py-1.5 text-center">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${
@@ -461,7 +479,7 @@ export default async function PaperV8Page({ searchParams }: Props) {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono text-white">
-                    ${Number(t.equity_after ?? STARTING_EQUITY).toFixed(2)}
+                    ${Number(t.equity_after_baseline ?? t.equity_after ?? STARTING_EQUITY).toFixed(2)}
                   </td>
                 </tr>
               ))}
