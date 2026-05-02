@@ -19,7 +19,7 @@ const PER_PAGE = 30;
 //
 // Ratchet this date forward when meaningful policy changes ship (new floors,
 // new sizing) so the live numbers you read here reflect the current rules.
-const FILTER_ERA_CUTOFF = "2026-05-02T03:11:00Z";
+const FILTER_ERA_CUTOFF = "2026-05-02T14:09:00Z";
 
 // Trade-quality classifiers (sizing-mode) — production HistGradientBoosting models.
 // AUC + n_train values come from the 3-year backtest validation
