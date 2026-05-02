@@ -165,14 +165,14 @@ V8_E2_ATR_TP_MULT = 6.0
 V8_TIMEOUT_BARS = 672  # 7 days at 15m
 V8_STARTING_EQUITY_USD = float(os.environ.get("V8_STARTING_EQUITY_USD", "200"))
 
-# Per-detector cls_score floor — Stage A from the 2026-05-01 adaptive-exit
-# research (docs/research-journal/v8-macd-pullback-long-adaptive-exit-2026-05-01.md).
-# 3-year backtest: every cell loses money on macd_pullback_long trades with
-# cls_score < 0.30; filter at 0.40 cuts MDD 8× (159% → 19%) and 2.27× total
-# return (+4263% → +9674%). Only macd_pullback_long has been studied; other
-# detectors remain unfiltered until per-detector research lands.
+# Per-detector cls_score floor — Stage A adaptive-exit research.
+# macd_pullback_long (2026-05-01): filter at 0.40 cuts MDD 8× and 2.27× total return.
+# macd_pullback_short (2026-05-02): filter at 0.35 improves hold Calmar +65.9%
+#   (24.16 → 40.09) and cuts MDD 3.5× (14.82% → 4.23%); hold PF 4.27 → 5.82.
+# macd_early_trend_short: tested, best T=0.45 only +2.7% Calmar — not shipped.
 V8_CLS_SCORE_FLOOR: dict[str, float] = {
     "v8_macd_pullback_long_e2": float(os.environ.get("V8_MACD_PULLBACK_LONG_CLS_FLOOR", "0.40")),
+    "v8_macd_pullback_short_e2": float(os.environ.get("V8_MACD_PULLBACK_SHORT_CLS_FLOOR", "0.35")),
 }
 
 V8_ACCOUNTS: list[dict] = [
