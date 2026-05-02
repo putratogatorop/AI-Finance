@@ -165,6 +165,16 @@ V8_E2_ATR_TP_MULT = 6.0
 V8_TIMEOUT_BARS = 672  # 7 days at 15m
 V8_STARTING_EQUITY_USD = float(os.environ.get("V8_STARTING_EQUITY_USD", "200"))
 
+# Per-detector cls_score floor — Stage A from the 2026-05-01 adaptive-exit
+# research (docs/research-journal/v8-macd-pullback-long-adaptive-exit-2026-05-01.md).
+# 3-year backtest: every cell loses money on macd_pullback_long trades with
+# cls_score < 0.30; filter at 0.40 cuts MDD 8× (159% → 19%) and 2.27× total
+# return (+4263% → +9674%). Only macd_pullback_long has been studied; other
+# detectors remain unfiltered until per-detector research lands.
+V8_CLS_SCORE_FLOOR: dict[str, float] = {
+    "v8_macd_pullback_long_e2": float(os.environ.get("V8_MACD_PULLBACK_LONG_CLS_FLOOR", "0.40")),
+}
+
 V8_ACCOUNTS: list[dict] = [
     # macd_pullback_short_e2 — Week 8 PRIMARY SHORT (wf_p5 2.10, holdout PF 4.29)
     {"strategy": "v8_macd_pullback_short_e2",
@@ -844,6 +854,19 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
         except Exception as e:
             logger.warning(f"v8 classifier exception on {strategy}/{sig.symbol}: {e}")
             cls_multiplier, cls_info = 1.0, {"mode": "exception", "reason": str(e)[:120]}
+
+    # Per-detector cls_score filter (Stage A from 2026-05-01 adaptive-exit research).
+    # Trades below the floor are skipped entirely — research showed every exit cell
+    # loses money in the low-score region for macd_pullback_long. Other detectors
+    # are unfiltered until per-detector research is done.
+    cls_floor = V8_CLS_SCORE_FLOOR.get(strategy)
+    if cls_floor is not None:
+        if cls_score is None or cls_score < cls_floor:
+            logger.info(
+                f"[DRY-RUN {strategy}] SKIP {sig.symbol} reason=cls_score_below_floor "
+                f"score={cls_score} floor={cls_floor} eq=${equity:.2f}"
+            )
+            return
 
     adjusted_notional_usd = decision.notional_usd * cls_multiplier
     adjusted_notional_pct = decision.notional_pct * cls_multiplier
