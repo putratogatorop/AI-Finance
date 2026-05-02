@@ -7,6 +7,16 @@ const STARTING_EQUITY = 200.0;
 const V8_SENTINEL_THRESHOLD = 3.0;
 const PER_PAGE = 30;
 
+// Filter-era cutoff. Paper trades whose entry_time predates this are hidden
+// from this dashboard so the view reflects the system as it actually runs
+// today: BGM classifier scoring + per-detector cls_score floor (0.40 on
+// macd_pullback_long, see paper_executor.py V8_CLS_SCORE_FLOOR). Pre-cutoff
+// trades are still in the DB and visible on /paper-v8 (the baseline page).
+//
+// Ratchet this date forward when meaningful policy changes ship (new floors,
+// new sizing) so the live numbers you read here reflect the current rules.
+const FILTER_ERA_CUTOFF = "2026-05-01T03:11:00Z";
+
 // Trade-quality classifiers (sizing-mode) — production HistGradientBoosting models.
 // AUC + n_train values come from the 3-year backtest validation
 // (see services/python/models/v8_classifier_3y/*_meta.json).
@@ -93,6 +103,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
         MAX(entry_time) AS latest_entry
       FROM paper_trades
       WHERE strategy LIKE 'v8_%' AND threshold = ${V8_SENTINEL_THRESHOLD}
+        AND entry_time >= '${FILTER_ERA_CUTOFF}'::timestamptz
       GROUP BY strategy
       ORDER BY strategy
     `);
@@ -128,6 +139,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
              tp_price, sl_price, ml_prob, pos_scale, btc_score, exit_kind
       FROM paper_trades
       WHERE status='open' AND threshold = ${V8_SENTINEL_THRESHOLD} ${stratClause}
+        AND entry_time >= '${FILTER_ERA_CUTOFF}'::timestamptz
       ORDER BY entry_time DESC
       LIMIT 50
     `);
@@ -141,6 +153,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
       SELECT COUNT(*)::int AS n FROM paper_trades
       WHERE status IN ('won','lost','timeout')
         AND threshold = ${V8_SENTINEL_THRESHOLD} ${stratClause}
+        AND entry_time >= '${FILTER_ERA_CUTOFF}'::timestamptz
     `);
     totalClosed = cr[0]?.n || 0;
     closedTrades = await prisma.$queryRawUnsafe(`
@@ -150,6 +163,7 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
       FROM paper_trades
       WHERE status IN ('won','lost','timeout')
         AND threshold = ${V8_SENTINEL_THRESHOLD} ${stratClause}
+        AND entry_time >= '${FILTER_ERA_CUTOFF}'::timestamptz
       ORDER BY exit_time DESC NULLS LAST
       LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
     `);
@@ -166,16 +180,25 @@ export default async function PaperV8MLPage({ searchParams }: Props) {
             <span className="text-sm font-normal text-yellow-400">DRY-RUN · sizing-mode</span>
           </h1>
           <p className="text-sm text-slate-400 mt-1">
+            <span className="text-brand-400 font-semibold">Filter-era only:</span>{" "}
+            showing trades opened on or after{" "}
+            <code className="text-slate-300">{FILTER_ERA_CUTOFF}</code> — the
+            point at which the cls_score floor (0.40 on{" "}
+            <code className="text-slate-300">macd_pullback_long</code>) went
+            live. Pre-cutoff trades (pre-classifier deploys, plus the noisy 70-
+            trade unfiltered window) are hidden here; they remain on{" "}
+            <Link href="/paper-v8" className="underline hover:text-white">
+              /paper-v8
+            </Link>{" "}
+            (the baseline page) and in the raw{" "}
+            <code className="text-slate-300">paper_trades</code> table.{" "}
             Per-detector HistGradientBoosting classifier sizes each entry by a
             multiplier in <span className="text-slate-300">[0.50, 1.50]</span>{" "}
             (capital-neutral on the train distribution). Live classifier score
             is stored in <code className="text-slate-300">ml_prob</code>;
             adjusted size in <code className="text-slate-300">pos_scale</code>.
             Models trained on 3-year snapshot 2026-04-01, validated on 2026Q1
-            holdout. Source artifacts:{" "}
-            <code className="text-slate-300">
-              services/python/models/v8_classifier_3y/
-            </code>
+            holdout.
           </p>
         </div>
         <div className="flex items-center gap-2">
