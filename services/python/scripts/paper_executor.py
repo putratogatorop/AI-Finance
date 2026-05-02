@@ -478,6 +478,9 @@ def ensure_paper_table(engine):
         conn.execute(text(
             "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS cls_multiplier DOUBLE PRECISION"
         ))
+        conn.execute(text(
+            "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS cls_score_v2 DOUBLE PRECISION"
+        ))
 
 
 # ── Paper trade logic ────────────────────────────────────────────────
@@ -855,6 +858,19 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
             logger.warning(f"v8 classifier exception on {strategy}/{sig.symbol}: {e}")
             cls_multiplier, cls_info = 1.0, {"mode": "exception", "reason": str(e)[:120]}
 
+    # ── v2p2 A/B score (logged only — does NOT affect trade decisions) ──
+    cls_score_v2: float | None = None
+    if classifier is not None and strategy == "v8_macd_pullback_long_e2":
+        try:
+            cls_score_v2, _ = classifier.score_size_v2(
+                strategy=strategy,
+                symbol=sig.symbol,
+                entry_time=sig.signal_time,
+                signal_row={"btc_score": sig.btc_score, "atr14_at_entry": sig.atr14_at_entry},
+            )
+        except Exception as e:
+            logger.debug(f"v8 v2p2 classifier exception on {sig.symbol}: {e}")
+
     # Per-detector cls_score filter (Stage A from 2026-05-01 adaptive-exit research).
     # Trades below the floor are skipped entirely — research showed every exit cell
     # loses money in the low-score region for macd_pullback_long. Other detectors
@@ -910,11 +926,11 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
              entry_time, entry_price, position_usd, tp_price, sl_price, status,
              regime_allowed, venue,
              atr14_at_entry, btc_score, pos_scale, exit_kind,
-             notional_usd_unscaled, cls_multiplier)
+             notional_usd_unscaled, cls_multiplier, cls_score_v2)
             VALUES (:st, :sid, :th, :strat, :sym, :dir, :ml, :et, :ep, :pos,
                     :tp, :sl, 'open', NULL, :venue,
                     :atr, :bs, :psc, :ek,
-                    :nuu, :cmu)
+                    :nuu, :cmu, :csv2)
             ON CONFLICT (source_table, source_id, threshold, strategy) DO NOTHING
         """), {
             "st": sig.source_table, "sid": sig.source_id,
@@ -924,12 +940,11 @@ def open_v8_paper_trade(engine, sig: Signal, account: dict, classifier: V8Classi
             "pos": adjusted_notional_usd, "tp": tp_price, "sl": sl_price,
             "venue": venue,
             "atr": sig.atr14_at_entry, "bs": sig.btc_score,
-            "psc": adjusted_notional_pct,  # store classifier-adjusted notional_pct as pos_scale
+            "psc": adjusted_notional_pct,
             "ek": account["exit"],
-            # BGM baseline counterfactual: store the v6 base notional BEFORE the
-            # classifier multiplier so the close path can compute pnl_usd_unscaled.
             "nuu": float(decision.notional_usd),
             "cmu": float(cls_multiplier),
+            "csv2": float(cls_score_v2) if cls_score_v2 is not None else None,
         })
 
 
