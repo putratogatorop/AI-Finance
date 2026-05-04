@@ -25,8 +25,28 @@ from datetime import UTC, datetime
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss
+
+
+# ── CalibratedLGBM stub — must match the class used when model was pickled ────
+# The joblib file was serialised with this class defined in v_new_1_phase3_train.
+# We must define an identical class here so pickle can reconstruct the object.
+class CalibratedLGBM:
+    """LGBMClassifier + IsotonicRegression calibrator (matches phase3_train.py)."""
+
+    def __init__(self, base_model, calibrator: IsotonicRegression) -> None:
+        self.base_model = base_model
+        self.calibrator = calibrator
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:  # noqa: N803
+        raw = self.base_model.predict_proba(X)[:, 1]
+        cal = self.calibrator.predict(raw)
+        return np.column_stack([1.0 - cal, cal])
+
+    def predict(self, X: np.ndarray) -> np.ndarray:  # noqa: N803
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
