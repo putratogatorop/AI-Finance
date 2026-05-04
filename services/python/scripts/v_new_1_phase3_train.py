@@ -18,6 +18,10 @@ OUTPUTS:
     services/python/models/v_new_1_short/v_new_1_short.joblib + _meta.json
     services/python/data/v_new_1/oos_scored_long.parquet
     services/python/data/v_new_1/oos_scored_short.parquet
+    services/python/data/v_new_1/oof_scored_long.parquet         (NEW — train_fit OOF preds for v_new_1.5)
+    services/python/data/v_new_1/oof_scored_short.parquet        (NEW — train_fit OOF preds for v_new_1.5)
+    services/python/data/v_new_1/cal_scored_long.parquet         (NEW — cal_fit raw preds, non-leaky)
+    services/python/data/v_new_1/cal_scored_short.parquet        (NEW — cal_fit raw preds, non-leaky)
     services/python/results/v_new_1_phase3/training.log (from nohup redirect)
 """
 
@@ -68,6 +72,21 @@ EMBARGO_DAYS = 10           # 10-day embargo (covers the 7-day label horizon + b
 LGBM_NUM_THREADS = int(os.environ.get("LGBM_NUM_THREADS", "0"))  # 0 = LightGBM picks (all cores). Set to 4 on VPS to leave 4 cores for live trading.
 SHAP_SUBSAMPLE = 10_000     # rows for SHAP computation (speed/memory balance)
 
+# v_new_1.5 mode: when set, train on features_full_v1_5.parquet (44 base + 12
+# sequence features) and write artifacts under v_new_1_{long,short}_v1_5.
+V_NEW_1_5_MODE = os.environ.get("V_NEW_1_5_MODE", "0") == "1"
+MODE_SUFFIX = "_v1_5" if V_NEW_1_5_MODE else ""
+FEATURES_PARQUET_NAME = "features_full_v1_5.parquet" if V_NEW_1_5_MODE else "features_full.parquet"
+
+V_NEW_1_5_SEQUENCE_FEATURES = [
+    "score_long_t1", "score_long_t2", "score_long_t6",
+    "score_long_roll_mean_3d", "score_long_roll_std_3d",
+    "score_long_change_1d",
+    "score_short_t1", "score_short_t2", "score_short_t6",
+    "score_short_roll_mean_3d", "score_short_roll_std_3d",
+    "score_short_change_1d",
+]
+
 # Chronological split boundaries (inclusive)
 TRAIN_FIT_END = pd.Timestamp("2024-09-30 23:59:59", tz="UTC")
 CAL_FIT_START = pd.Timestamp("2024-10-01", tz="UTC")
@@ -109,6 +128,13 @@ def _load_features() -> list[str]:
     for a in additions:
         if a not in seen:
             filtered.append(a)
+
+    # v_new_1.5: append sequence features when toggled.
+    if V_NEW_1_5_MODE:
+        for s in V_NEW_1_5_SEQUENCE_FEATURES:
+            if s not in seen:
+                filtered.append(s)
+                seen.add(s)
     return filtered
 
 
@@ -387,7 +413,7 @@ def train_direction(direction: str) -> dict:
       - OOS years are touched exactly once for evaluation
     """
     label_col = "long_event" if direction == "long" else "short_event"
-    dir_label = f"v_new_1_{direction}"
+    dir_label = f"v_new_1_{direction}{MODE_SUFFIX}"
     t0_dir = time.time()
 
     print(f"\n{'='*70}")
@@ -407,7 +433,7 @@ def train_direction(direction: str) -> dict:
     all_feat_cols = ["symbol", "timestamp"] + [
         f for f in needed_feature_cols if f not in ("symbol", "timestamp")
     ]
-    features = pd.read_parquet(DATA_DIR / "features_full.parquet", columns=all_feat_cols)
+    features = pd.read_parquet(DATA_DIR / FEATURES_PARQUET_NAME, columns=all_feat_cols)
     features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True)
     print(f"  features: {len(features):,} rows, {features.shape[1]} cols")
 
@@ -513,6 +539,10 @@ def train_direction(direction: str) -> dict:
 
     per_fold_metrics = []
     fold_best_iters = []
+    # OOF capture: each train_fit row's prediction comes from the fold where it was held out.
+    # Rows in the very first TimeSeriesSplit slice and rows inside the 10-day embargo zone
+    # never become test samples, so they remain NaN — that's expected and handled downstream.
+    oof_probs = np.full(len(X_train), np.nan, dtype=np.float64)
     for fold_i, (tr_idx, val_idx) in enumerate(splits):
         X_tr, y_tr = X_train[tr_idx], y_train[tr_idx]  # noqa: N806
         X_val, y_val = X_train[val_idx], y_train[val_idx]  # noqa: N806
@@ -523,6 +553,7 @@ def train_direction(direction: str) -> dict:
             callbacks=[lgb.early_stopping(80, verbose=False), lgb.log_evaluation(-1)],
         )
         probs = clf.predict_proba(X_val)[:, 1]
+        oof_probs[val_idx] = probs
         best_iter = int(clf.best_iteration_) if clf.best_iteration_ else full_params["n_estimators"]
         fold_best_iters.append(best_iter)
         fm = {
@@ -664,13 +695,46 @@ def train_direction(direction: str) -> dict:
     print(f"\n{_ts(dir_label)} Saved model: {model_path}")
 
     # OOS scored parquet
-    oos_path = DATA_DIR / f"oos_scored_{direction}.parquet"
+    oos_path = DATA_DIR / f"oos_scored_{direction}{MODE_SUFFIX}.parquet"
     if oos_scored_rows:
         oos_scored_df = pd.concat(oos_scored_rows, ignore_index=True)
         oos_scored_df.to_parquet(oos_path, index=False)
         print(f"{_ts(dir_label)} Saved OOS scored: {oos_path} ({len(oos_scored_df):,} rows)")
     else:
         print(f"{_ts(dir_label)} WARNING: no OOS scored rows to save")
+
+    # ── 18b. OOF scored parquet (train_fit) — for v_new_1.5 lagged features ─
+    # OOF covers train_fit rows where the row was a CV val sample. Rows in the
+    # very first TimeSeriesSplit slice and rows inside fold-boundary embargoes
+    # remain NaN. Downstream sequence-feature builder must dropna or forward-fill.
+    oof_path = DATA_DIR / f"oof_scored_{direction}{MODE_SUFFIX}.parquet"
+    oof_df = pd.DataFrame({
+        "symbol": train_fit["symbol"].values,
+        "timestamp": train_fit["timestamp"].values,
+        "score_raw": oof_probs,
+        label_col: y_train,
+        "split": "train_fit_oof",
+    })
+    n_oof_valid = int((~oof_df["score_raw"].isna()).sum())
+    oof_df.to_parquet(oof_path, index=False)
+    print(f"{_ts(dir_label)} Saved OOF scored: {oof_path} "
+          f"({n_oof_valid:,} / {len(oof_df):,} rows have OOF scores; "
+          f"{len(oof_df) - n_oof_valid:,} NaN from first-slice + embargo)")
+
+    # ── 18c. Cal scored parquet (cal_fit) — non-leaky raw probs from final model ─
+    # final_model was fit on train_fit only, so its predictions on cal_fit are
+    # honest. Calibrated scores would be leaky on cal_fit (calibrator was fit
+    # there), so we save RAW scores for use as v_new_1.5 lagged features.
+    cal_path = DATA_DIR / f"cal_scored_{direction}{MODE_SUFFIX}.parquet"
+    cal_df = pd.DataFrame({
+        "symbol": cal_fit["symbol"].values,
+        "timestamp": cal_fit["timestamp"].values,
+        "score_raw": raw_cal_probs,
+        label_col: y_cal,
+        "split": "cal_fit",
+    })
+    cal_df.to_parquet(cal_path, index=False)
+    print(f"{_ts(dir_label)} Saved CAL scored: {cal_path} ({len(cal_df):,} rows)")
 
     # Meta JSON
     elapsed_min = round((time.time() - t0_dir) / 60.0, 1)
@@ -796,10 +860,16 @@ def main() -> None:
         print(f"  v_new_1_{lbl}: {pr:.4f} — {gate}")
     print()
     print("Artifacts written to:")
-    print(f"  {PYTHON_ROOT}/models/v_new_1_long/")
-    print(f"  {PYTHON_ROOT}/models/v_new_1_short/")
-    print(f"  {DATA_DIR}/oos_scored_long.parquet")
-    print(f"  {DATA_DIR}/oos_scored_short.parquet")
+    print(f"  {PYTHON_ROOT}/models/v_new_1_long{MODE_SUFFIX}/")
+    print(f"  {PYTHON_ROOT}/models/v_new_1_short{MODE_SUFFIX}/")
+    print(f"  {DATA_DIR}/oos_scored_long{MODE_SUFFIX}.parquet")
+    print(f"  {DATA_DIR}/oos_scored_short{MODE_SUFFIX}.parquet")
+    print(f"  {DATA_DIR}/oof_scored_long{MODE_SUFFIX}.parquet")
+    print(f"  {DATA_DIR}/oof_scored_short{MODE_SUFFIX}.parquet")
+    print(f"  {DATA_DIR}/cal_scored_long{MODE_SUFFIX}.parquet")
+    print(f"  {DATA_DIR}/cal_scored_short{MODE_SUFFIX}.parquet")
+    if V_NEW_1_5_MODE:
+        print(f"  (V_NEW_1_5_MODE=1: 12 sequence features added; trained on features_full_v1_5.parquet)")
 
 
 if __name__ == "__main__":
