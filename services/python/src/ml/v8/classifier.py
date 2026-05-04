@@ -35,8 +35,10 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import lightgbm as lgbm  # noqa: F401 (needed to unpickle CalibratedLGBM from v2p2 models)
 import numpy as np
 import pandas as pd
+from sklearn.isotonic import IsotonicRegression  # noqa: F401
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -82,6 +84,38 @@ RSI_PERIOD = 14
 # Cache TTL — refresh BTC + breadth every 15 minutes (one bar)
 CACHE_TTL_SECONDS = 15 * 60
 
+# ── v2p2 model constants (parallel A/B scoring path, does not affect live trades) ──
+
+MODELS_DIR_V2P2 = Path(__file__).resolve().parents[3] / "models" / "v8_classifier_lgbm_v2p2"
+
+# Optimal threshold from Phase 2 training (shifted from v1's 0.40 due to isotonic calibration)
+CLS_THRESHOLD_V2P2: dict[str, float] = {
+    "v8_macd_pullback_long_e2": 0.475,
+}
+
+DETECTOR_MODEL_STEMS_V2P2: dict[str, str] = {
+    "v8_macd_pullback_long_e2": "macd_pullback_long_lgbm_v2p2",
+}
+
+# 40 features: 27 P1 + 13 P2 (cvd_divergence_4h pruned: SHAP=0)
+FEATURES_V2P2: list[str] = [
+    # P1
+    "atr14_pct_rank_90d", "vol_z_24h", "coin_7d_return", "coin_30d_return",
+    "close_to_high50_atr", "close_to_low50_atr",
+    "bar4h_close_pos_in_range", "bar4h_body_pct", "bar4h_upper_wick_pct",
+    "h4_macd_hist", "h4_macd_macd", "h4_rsi", "h4_close_vs_ema50_pct",
+    "daily_macd_hist", "days_since_bull_flip", "days_since_bear_flip",
+    "btc_above_4h_ema50", "btc_24h_return", "btc_realized_vol_z", "btc_score",
+    "breadth_up", "breadth_down", "signals_same_15m_same_detector",
+    "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+    # P2
+    "cvd_slope_1h_norm", "bb_pct_b", "bb_bandwidth", "fib_pos_50",
+    "kdj_k", "kdj_j", "price_vs_ema9_pct",
+    "rsi14_delta_1bar", "rsi14_delta_4bar",
+    "macd_hist_momentum", "macd_signal_spread_norm",
+    "parkinson_vol", "obv_slope_norm",
+]
+
 
 # --- INDICATOR HELPERS (same math as training) --------------------------
 
@@ -123,6 +157,21 @@ def _ema(close: pd.Series, span: int) -> pd.Series:
     return close.ewm(span=span, adjust=False).mean()
 
 
+# --- CALIBRATED LGBM WRAPPER (for joblib unpickling v2p2 models) -----------
+
+class CalibratedLGBM:
+    """LGBMClassifier + IsotonicRegression calibrator from Phase 2 training."""
+
+    def __init__(self, base_model: lgbm.LGBMClassifier, calibrator: IsotonicRegression) -> None:
+        self.base_model = base_model
+        self.calibrator = calibrator
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        raw = self.base_model.predict_proba(X)[:, 1]
+        cal = self.calibrator.predict(raw)
+        return np.column_stack([1.0 - cal, cal])
+
+
 # --- LIVE FEATURE BUILDER --------------------------------------------------
 
 @dataclass
@@ -142,8 +191,11 @@ class V8Classifier:
         self.models_dir = models_dir or MODELS_DIR
         self._models: dict[str, Any] = {}
         self._metas: dict[str, dict] = {}
+        self._models_v2: dict[str, Any] = {}
+        self._metas_v2: dict[str, dict] = {}
         self._cache = _Caches()
         self._load_models()
+        self._load_v2_models()
 
     def _load_models(self) -> None:
         for det, stem in DETECTOR_MODEL_STEMS.items():
@@ -167,6 +219,20 @@ class V8Classifier:
                 self._metas[det].get("size_low", 0.5),
                 self._metas[det].get("size_high", 1.5),
             )
+
+    def _load_v2_models(self) -> None:
+        for det, stem in DETECTOR_MODEL_STEMS_V2P2.items():
+            model_path = MODELS_DIR_V2P2 / f"{stem}.joblib"
+            meta_path = MODELS_DIR_V2P2 / f"{stem}_meta.json"
+            if not model_path.exists() or not meta_path.exists():
+                logger.info("v8 v2p2 classifier not found for %s — A/B scoring disabled", det)
+                continue
+            self._models_v2[det] = joblib.load(model_path)
+            with open(meta_path) as f:
+                self._metas_v2[det] = json.load(f)
+            logger.info("v8 v2p2 classifier loaded: %s (n_features=%d, thr=%.3f)",
+                        det, self._metas_v2[det].get("n_features", 0),
+                        CLS_THRESHOLD_V2P2.get(det, 0.475))
 
     # --- public API --------------------------------------------------------
 
@@ -225,6 +291,207 @@ class V8Classifier:
         size_low = float(meta.get("size_low", 0.5))
         size_high = float(meta.get("size_high", 1.5))
         return size_low + (size_high - size_low) * rank
+
+    def score_size_v2(
+        self,
+        strategy: str,
+        symbol: str,
+        entry_time: datetime,
+        signal_row: dict[str, Any],
+    ) -> tuple[float | None, dict[str, Any]]:
+        """Return (cls_score_v2, info_dict) using the v2p2 LightGBM model.
+
+        This is a parallel A/B scoring path — result is logged for comparison
+        but does NOT affect live trading decisions. Returns (None, info) if the
+        v2p2 model is not loaded or feature computation fails.
+        """
+        if strategy not in self._models_v2:
+            return None, {"mode": "no_v2_model"}
+
+        try:
+            p1_feats = self._build_features(strategy, symbol, entry_time, signal_row)
+            p2_feats = self._compute_p2_extra_features(symbol, entry_time)
+        except Exception as e:
+            logger.debug("v8 v2p2 feature build failed for %s/%s: %s", strategy, symbol, e)
+            return None, {"mode": "feature_error_v2", "reason": str(e)[:120]}
+
+        x = np.array([{**p1_feats, **p2_feats}[f] for f in FEATURES_V2P2], dtype=float)
+        if not np.all(np.isfinite(x)):
+            return None, {"mode": "nan_features_v2"}
+
+        try:
+            score = float(self._models_v2[strategy].predict_proba(x.reshape(1, -1))[0, 1])
+        except Exception as e:
+            logger.debug("v8 v2p2 predict failed for %s/%s: %s", strategy, symbol, e)
+            return None, {"mode": "predict_error_v2", "reason": str(e)[:120]}
+
+        return score, {"mode": "v2p2", "score_v2": round(score, 4),
+                       "thr_v2": CLS_THRESHOLD_V2P2.get(strategy, 0.475)}
+
+    def _compute_p2_extra_features(self, symbol: str, entry_time: datetime) -> dict[str, float]:
+        """Compute the 13 P2 features from live 15m candles.
+
+        Uses the same asset_prices_15m query as _compute_per_asset_features.
+        All features are OHLCV-derived with no lookahead.
+        """
+        bars_needed = 90 * 96
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT timestamp, high, low, close, volume
+                    FROM asset_prices_15m
+                    WHERE asset = :asset AND timestamp <= :t
+                    ORDER BY timestamp DESC
+                    LIMIT :lim
+                """),
+                {"asset": symbol, "t": entry_time, "lim": bars_needed},
+            ).fetchall()
+        if len(rows) < 200:
+            raise ValueError(f"insufficient candles for {symbol} ({len(rows)} bars)")
+
+        df = pd.DataFrame(rows, columns=["timestamp", "high", "low", "close", "volume"])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        ts_idx = pd.DatetimeIndex(pd.to_datetime(df["timestamp"], utc=True))
+        c = df["close"].astype(float).to_numpy()
+        h = df["high"].astype(float).to_numpy()
+        lo = df["low"].astype(float).to_numpy()
+        v = df["volume"].astype(float).to_numpy()
+        n = len(c)
+
+        s_close = pd.Series(c, index=ts_idx)
+        s_high = pd.Series(h, index=ts_idx)
+        s_low = pd.Series(lo, index=ts_idx)
+        s_vol = pd.Series(v, index=ts_idx)
+
+        # ── 15m features ──────────────────────────────────────────────────
+        sign_diff = np.sign(s_close.diff().fillna(0.0))
+        cvd = (sign_diff * s_vol).cumsum()
+        cvd_4 = float(cvd.iloc[-5]) if n >= 5 else float("nan")
+        vol_abs_sum4 = float(s_vol.iloc[-4:].sum())
+        cvd_slope_1h_norm = (float(cvd.iloc[-1]) - cvd_4) / vol_abs_sum4 \
+            if vol_abs_sum4 > 0 and np.isfinite(cvd_4) else float("nan")
+
+        h50 = float(s_close.iloc[-50:].max()) if n >= 50 else float("nan")
+        l50 = float(s_close.iloc[-50:].min()) if n >= 50 else float("nan")
+        fib_pos_50 = (c[-1] - l50) / (h50 - l50) if np.isfinite(h50) and (h50 - l50) > 0 \
+            else float("nan")
+
+        if n >= 96:
+            log_hl = np.log((s_high.iloc[-96:] / s_low.iloc[-96:]).replace(0.0, np.nan))
+            parkinson_sq_mean = float((log_hl ** 2).mean())
+            parkinson_vol = float(np.sqrt(parkinson_sq_mean / (4.0 * np.log(2.0)))) \
+                if parkinson_sq_mean >= 0 else float("nan")
+        else:
+            parkinson_vol = float("nan")
+
+        if n >= 24:
+            obv = (sign_diff * s_vol).cumsum()
+            obv_24 = obv.iloc[-24:].to_numpy()
+            x_vals = np.arange(24, dtype=float)
+            obv_slope = float(np.polyfit(x_vals, obv_24, 1)[0])
+            mean_vol_24 = float(s_vol.iloc[-24:].mean())
+            obv_slope_norm = obv_slope / mean_vol_24 if mean_vol_24 > 0 else float("nan")
+        else:
+            obv_slope_norm = float("nan")
+
+        # ── 4h features (prior completed bar) ────────────────────────────
+        h4_close = s_close.resample("4h").last().dropna()
+        h4_high = s_high.resample("4h").max().reindex(h4_close.index)
+        h4_low = s_low.resample("4h").min().reindex(h4_close.index)
+
+        prior_4h_label = pd.Timestamp(entry_time).floor("4h") - pd.Timedelta("4h")
+        if prior_4h_label not in h4_close.index:
+            candidates = h4_close.index[h4_close.index < pd.Timestamp(entry_time)]
+            if len(candidates) == 0:
+                nan_feat: dict[str, float] = {
+                    f: float("nan") for f in [
+                        "bb_pct_b", "bb_bandwidth", "kdj_k", "kdj_j",
+                        "price_vs_ema9_pct", "rsi14_delta_1bar", "rsi14_delta_4bar",
+                        "macd_hist_momentum", "macd_signal_spread_norm",
+                    ]
+                }
+                return {"cvd_slope_1h_norm": cvd_slope_1h_norm, "fib_pos_50": fib_pos_50,
+                        "parkinson_vol": parkinson_vol, "obv_slope_norm": obv_slope_norm,
+                        **nan_feat}
+            prior_4h_label = candidates[-1]
+
+        C4 = float(h4_close.loc[prior_4h_label])
+        prior_pos = int(h4_close.index.get_loc(prior_4h_label))
+
+        def _nan_if_not_enough(series: pd.Series, idx: int, min_pos: int) -> float:
+            return float(series.iloc[idx]) if idx >= min_pos else float("nan")
+
+        # Bollinger Bands (20-bar)
+        bb_mid_s = h4_close.rolling(20, min_periods=20).mean()
+        bb_std_s = h4_close.rolling(20, min_periods=20).std()
+        bb_mid = _nan_if_not_enough(bb_mid_s, prior_pos, 19)
+        bb_std = _nan_if_not_enough(bb_std_s, prior_pos, 19)
+        if np.isfinite(bb_mid) and np.isfinite(bb_std) and bb_std > 0:
+            bb_upper = bb_mid + 2.0 * bb_std
+            bb_lower = bb_mid - 2.0 * bb_std
+            bb_rng = bb_upper - bb_lower
+            bb_pct_b = (C4 - bb_lower) / bb_rng
+            bb_bandwidth = bb_rng / bb_mid if bb_mid > 0 else float("nan")
+        else:
+            bb_pct_b = bb_bandwidth = float("nan")
+
+        # KDJ (9-period RSV, 3-smooth K, 3-smooth D)
+        roll_lo_s = h4_low.rolling(9, min_periods=9).min()
+        roll_hi_s = h4_high.rolling(9, min_periods=9).max()
+        rsv_s = 100.0 * (h4_close - roll_lo_s) / (roll_hi_s - roll_lo_s).replace(0.0, np.nan)
+        kdj_k_s = rsv_s.rolling(3, min_periods=3).mean()
+        kdj_d_s = kdj_k_s.rolling(3, min_periods=3).mean()
+        kdj_j_s = 3.0 * kdj_k_s - 2.0 * kdj_d_s
+        kdj_k = _nan_if_not_enough(kdj_k_s, prior_pos, 10)
+        kdj_j = _nan_if_not_enough(kdj_j_s, prior_pos, 12)
+
+        # EMA9 → price_vs_ema9_pct
+        ema9_4h = h4_close.ewm(span=9, adjust=False).mean()
+        ema9_at = _nan_if_not_enough(ema9_4h, prior_pos, 0)
+        price_vs_ema9_pct = (C4 - ema9_at) / C4 if C4 > 0 and np.isfinite(ema9_at) \
+            else float("nan")
+
+        # RSI14 deltas
+        delta = h4_close.diff()
+        avg_gain = delta.clip(lower=0).ewm(alpha=1.0 / 14, adjust=False).mean()
+        avg_loss = (-delta).clip(lower=0).ewm(alpha=1.0 / 14, adjust=False).mean()
+        rsi_s = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss.replace(0.0, np.nan))
+        rsi_at = _nan_if_not_enough(rsi_s, prior_pos, 13)
+        rsi_1b = _nan_if_not_enough(rsi_s, prior_pos - 1, 13) if prior_pos >= 1 else float("nan")
+        rsi_4b = _nan_if_not_enough(rsi_s, prior_pos - 4, 13) if prior_pos >= 4 else float("nan")
+        rsi14_delta_1bar = (rsi_at - rsi_1b) if np.isfinite(rsi_at) and np.isfinite(rsi_1b) \
+            else float("nan")
+        rsi14_delta_4bar = (rsi_at - rsi_4b) if np.isfinite(rsi_at) and np.isfinite(rsi_4b) \
+            else float("nan")
+
+        # MACD histogram momentum + spread norm
+        ema_fast = h4_close.ewm(span=12, adjust=False).mean()
+        ema_slow = h4_close.ewm(span=26, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+        macd_sig = macd_line.ewm(span=9, adjust=False).mean()
+        hist_s = macd_line - macd_sig
+        hist_at = _nan_if_not_enough(hist_s, prior_pos, 25)
+        hist_2b = _nan_if_not_enough(hist_s, prior_pos - 2, 25) if prior_pos >= 2 \
+            else float("nan")
+        macd_hist_momentum = (hist_at - hist_2b) if np.isfinite(hist_at) and np.isfinite(hist_2b) \
+            else float("nan")
+        macd_signal_spread_norm = hist_at / C4 if C4 > 0 and np.isfinite(hist_at) else float("nan")
+
+        return {
+            "cvd_slope_1h_norm": cvd_slope_1h_norm,
+            "bb_pct_b": bb_pct_b,
+            "bb_bandwidth": bb_bandwidth,
+            "fib_pos_50": fib_pos_50,
+            "kdj_k": kdj_k,
+            "kdj_j": kdj_j,
+            "price_vs_ema9_pct": price_vs_ema9_pct,
+            "rsi14_delta_1bar": rsi14_delta_1bar,
+            "rsi14_delta_4bar": rsi14_delta_4bar,
+            "macd_hist_momentum": macd_hist_momentum,
+            "macd_signal_spread_norm": macd_signal_spread_norm,
+            "parkinson_vol": parkinson_vol,
+            "obv_slope_norm": obv_slope_norm,
+        }
 
     # --- feature build ----------------------------------------------------
 
