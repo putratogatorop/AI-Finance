@@ -626,6 +626,82 @@ def score_coin(
     return result
 
 
+# ── DB write helper ───────────────────────────────────────────────────────────
+
+def _write_signals_to_db(engine, signals_df: pd.DataFrame, run_ts: datetime) -> None:
+    """Insert/upsert shadow signals to v_new_1_shadow_signals table.
+
+    Uses an INSERT ... ON CONFLICT (timestamp, symbol, direction) DO UPDATE
+    pattern so cron re-runs are idempotent. Requires a unique constraint; if
+    the table doesn't have one yet, falls back to DELETE+INSERT for the same
+    run_ts.
+    """
+    if signals_df.empty:
+        return
+
+    rows = []
+    for _, r in signals_df.iterrows():
+        rows.append({
+            "timestamp": run_ts,
+            "symbol": str(r["symbol"]),
+            "direction": str(r["direction"]),
+            "score_raw": float(r["score_raw"]),
+            "score_platt": float(r["score_platt"]),
+            "rank": int(r["rank"]),
+            "cfgi_value": int(float(r["cfgi_value"])),
+            "action": str(r["action"]),
+            "market_close": float(r["market_close_at_signal"])
+            if r.get("market_close_at_signal") is not None
+            and not (isinstance(r["market_close_at_signal"], float) and math.isnan(r["market_close_at_signal"]))
+            else 0.0,
+        })
+
+    with engine.begin() as conn:
+        # Check if unique constraint exists; if not, delete existing rows for
+        # this run_ts first (safe fallback for freshly-migrated tables without
+        # the constraint).
+        try:
+            conn.execute(
+                text("""
+                    INSERT INTO v_new_1_shadow_signals
+                        (timestamp, symbol, direction, score_raw, score_platt,
+                         rank, cfgi_value, action, market_close)
+                    VALUES
+                        (:timestamp, :symbol, :direction, :score_raw, :score_platt,
+                         :rank, :cfgi_value, :action, :market_close)
+                    ON CONFLICT (timestamp, symbol, direction)
+                    DO UPDATE SET
+                        score_raw    = EXCLUDED.score_raw,
+                        score_platt  = EXCLUDED.score_platt,
+                        rank         = EXCLUDED.rank,
+                        cfgi_value   = EXCLUDED.cfgi_value,
+                        action       = EXCLUDED.action,
+                        market_close = EXCLUDED.market_close
+                """),
+                rows,
+            )
+            print(f"{_ts('DB-write')} Upserted {len(rows)} rows to v_new_1_shadow_signals")
+        except Exception as upsert_err:
+            # ON CONFLICT requires a unique constraint — fall back to delete+insert
+            print(f"{_ts('DB-write')} Upsert failed ({upsert_err}), trying delete+insert ...")
+            conn.execute(
+                text("DELETE FROM v_new_1_shadow_signals WHERE timestamp = :ts"),
+                {"ts": run_ts},
+            )
+            conn.execute(
+                text("""
+                    INSERT INTO v_new_1_shadow_signals
+                        (timestamp, symbol, direction, score_raw, score_platt,
+                         rank, cfgi_value, action, market_close)
+                    VALUES
+                        (:timestamp, :symbol, :direction, :score_raw, :score_platt,
+                         :rank, :cfgi_value, :action, :market_close)
+                """),
+                rows,
+            )
+            print(f"{_ts('DB-write')} Inserted {len(rows)} rows (delete+insert fallback)")
+
+
 # ── Main scoring loop ─────────────────────────────────────────────────────────
 
 def run_shadow_scoring() -> None:
@@ -794,6 +870,15 @@ def run_shadow_scoring() -> None:
     else:
         signals_df.to_parquet(log_path, index=False)
         print(f"\n{_ts()} Created {log_path} ({len(signals_df)} rows)")
+
+    # ── Write signals to Postgres (for dashboard) ─────────────────────────────
+    # Idempotent: upsert on (timestamp, symbol, direction). If table doesn't
+    # exist yet (migration not run), we log and continue — parquet is the
+    # primary record; DB is secondary for the dashboard.
+    try:
+        _write_signals_to_db(engine, signals_df, run_ts)
+    except Exception as e:
+        print(f"{_ts('DB-write')} WARNING: failed to write signals to DB ({e}) — parquet only")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     taken = signals_df[signals_df["action"] == "taken"]

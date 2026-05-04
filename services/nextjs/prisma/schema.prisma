@@ -201,3 +201,23 @@ model VolumeBreakout {
   @@index([vol_ratio])
   @@map("volume_breakouts")
 }
+
+model V_New_1_ShadowSignal {
+  id            Int      @id @default(autoincrement())
+  timestamp     DateTime @db.Timestamptz()
+  symbol        String   @db.VarChar(20)
+  direction     String   @db.VarChar(10)
+  score_raw     Float
+  score_platt   Float
+  rank          Int
+  cfgi_value    Int
+  action        String   @db.VarChar(40)
+  market_close  Float
+  created_at    DateTime @default(now())
+
+  @@unique([timestamp, symbol, direction])
+  @@index([timestamp])
+  @@index([symbol, timestamp])
+  @@index([direction, action])
+  @@map("v_new_1_shadow_signals")
+}
