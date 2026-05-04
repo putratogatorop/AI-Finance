@@ -437,7 +437,7 @@ def get_top100_universe(engine) -> list[str]:
                 FROM asset_prices_15m
                 WHERE timestamp >= :start
                 GROUP BY asset
-                HAVING SUM(quote_volume) >= :min_vol
+                HAVING SUM(quote_volume) > 0
                 ORDER BY total_usd_volume DESC
                 LIMIT :top_n
                 """
@@ -445,7 +445,6 @@ def get_top100_universe(engine) -> list[str]:
             conn,
             params={
                 "start": lookback_start,
-                "min_vol": MIN_VOLUME_USD * 24 * 4 * 30,  # 30-day minimum total
                 "top_n": TOP_N_UNIVERSE,
             },
         )
@@ -810,12 +809,16 @@ def run_shadow_scoring() -> None:
     print(f"{'='*65}")
     print(f"  CFGI: {cfgi:.0f}  |  longs_allowed={longs_allowed}  shorts_allowed={shorts_allowed}")
     print(f"  Universe: {len(universe)} coins | Scored: {len(raw_scores)}")
-    print(f"  Longs TAKEN:  {len(taken_long):2d} / {TOP_K_LONG}  "
-          f"top-1: {top1_long['symbol'].values[0] if len(top1_long) else 'none'} "
-          f"({top1_long['score_platt'].values[0]:.3f} if len(top1_long) else '')".rstrip("'"))
-    print(f"  Shorts TAKEN: {len(taken_short):2d} / {TOP_K_SHORT}  "
-          f"top-1: {top1_short['symbol'].values[0] if len(top1_short) else 'none'} "
-          f"({top1_short['score_platt'].values[0]:.3f} if len(top1_short) else '')".rstrip("'"))
+    top1_long_info = (
+        f"{top1_long['symbol'].values[0]} ({top1_long['score_platt'].values[0]:.3f})"
+        if len(top1_long) else "none (CFGI gate blocked)"
+    )
+    top1_short_info = (
+        f"{top1_short['symbol'].values[0]} ({top1_short['score_platt'].values[0]:.3f})"
+        if len(top1_short) else "none (CFGI gate blocked)"
+    )
+    print(f"  Longs TAKEN:  {len(taken_long):2d} / {TOP_K_LONG}  top-1: {top1_long_info}")
+    print(f"  Shorts TAKEN: {len(taken_short):2d} / {TOP_K_SHORT}  top-1: {top1_short_info}")
     print(f"  Runtime: {elapsed:.1f}s")
     print(f"  Log: {log_path}")
 
