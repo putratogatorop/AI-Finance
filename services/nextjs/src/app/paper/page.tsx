@@ -1,401 +1,339 @@
-import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { SystemStatus } from "@/components/system-status";
 
-const PER_PAGE = 20;
-const STARTING_EQUITY = 100.0;
+export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
-const THRESHOLDS = [0.80, 0.75, 0.70, 0.65, 0.60];
+const INIT_BALANCE = 20.0;
 
-type RegimeFilter = "all" | "aligned" | "against" | "unknown";
-const REGIME_OPTIONS: { key: RegimeFilter; label: string; hint: string }[] = [
-  { key: "all",     label: "All",     hint: "both regime states + untagged" },
-  { key: "aligned", label: "Aligned", hint: "regime_allowed = TRUE (filter would have passed)" },
-  { key: "against", label: "Against", hint: "regime_allowed = FALSE (filter would have blocked)" },
-  { key: "unknown", label: "Untagged", hint: "pre-migration rows without regime state" },
-];
+type Kpi = {
+  equity: number;
+  pnlUsd: number;
+  pnlPct: number;
+  openCount: number;
+  realizedTrades: number;
+  winRate: number | null;
+  profitFactor: number | null;
+  avgWinPct: number | null;
+  avgLossPct: number | null;
+};
 
-function regimeSqlFragment(regime: RegimeFilter): string {
-  if (regime === "aligned") return " AND regime_allowed = TRUE";
-  if (regime === "against") return " AND regime_allowed = FALSE";
-  if (regime === "unknown") return " AND regime_allowed IS NULL";
-  return "";
+function pct(n: number | null, dp = 2): string {
+  if (n === null || !isFinite(n)) return "—";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(dp)}%`;
 }
 
-interface Props {
-  searchParams: Promise<{ page?: string; status?: string; direction?: string; threshold?: string; regime?: string }>;
+function usd(n: number, dp = 2): string {
+  return `${n >= 0 ? "" : "-"}$${Math.abs(n).toFixed(dp)}`;
 }
 
-export default async function PaperTradesPage({ searchParams }: Props) {
-  const params = await searchParams;
-  const page = Math.max(1, parseInt(params.page || "1") || 1);
-  const statusFilter = params.status || "all";
-  const dirFilter = params.direction || "all";
-  const threshold = parseFloat(params.threshold || "0.80");
-  const regime: RegimeFilter = (REGIME_OPTIONS.find(r => r.key === params.regime)?.key) || "all";
-  const regimeClause = regimeSqlFragment(regime);
+function classifyPnl(p: number | null): string {
+  if (p === null) return "text-slate-400";
+  return p > 0 ? "text-green-400" : p < 0 ? "text-red-400" : "text-slate-300";
+}
 
-  // Aggregate stats
-  let stats = {
-    totalTrades: 0, open: 0, won: 0, lost: 0, timeout: 0,
-    wr: 0, pf: 0, avgPnl: 0, totalPnl: 0, currentEquity: STARTING_EQUITY,
-    totalFees: 0,
+export default async function PaperVNew2Page() {
+  // ── KPIs ────────────────────────────────────────────────────────────────
+  const kpi: Kpi = {
+    equity: INIT_BALANCE,
+    pnlUsd: 0,
+    pnlPct: 0,
+    openCount: 0,
+    realizedTrades: 0,
+    winRate: null,
+    profitFactor: null,
+    avgWinPct: null,
+    avgLossPct: null,
   };
   try {
-    const r: any[] = await prisma.$queryRawUnsafe(`
+    const eqRow: any[] = await prisma.$queryRawUnsafe(`
       SELECT
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE status='open')::int as open_n,
-        COUNT(*) FILTER (WHERE status='won')::int as won_n,
-        COUNT(*) FILTER (WHERE status='lost')::int as lost_n,
-        COUNT(*) FILTER (WHERE status='timeout')::int as to_n,
-        COALESCE(ROUND(COUNT(*) FILTER (WHERE status='won')::numeric/GREATEST(COUNT(*) FILTER (WHERE status IN ('won','lost','timeout')),1)*100,1),0) as wr,
-        COALESCE(ROUND(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd>0),0)::numeric/ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0),0))::numeric,2),0) as pf,
-        COALESCE(ROUND(AVG(pnl_pct) FILTER (WHERE pnl_pct IS NOT NULL)::numeric*100,2),0) as avg_pnl,
-        COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl_usd,
-        COALESCE(ROUND(SUM(fees_usd)::numeric,2),0) as total_fees
-      FROM paper_trades WHERE threshold = ${threshold}${regimeClause}
+        COALESCE(SUM(pnl_usd), 0)::float AS realized_pnl,
+        COUNT(*)::int AS n_trades,
+        COUNT(*) FILTER (WHERE pnl_pct > 0)::int AS n_wins,
+        COUNT(*) FILTER (WHERE pnl_pct <= 0)::int AS n_losses,
+        AVG(pnl_pct) FILTER (WHERE pnl_pct > 0)::float AS avg_win,
+        AVG(pnl_pct) FILTER (WHERE pnl_pct <= 0)::float AS avg_loss,
+        COALESCE(SUM(pnl_usd) FILTER (WHERE pnl_usd > 0), 0)::float AS gross_win,
+        COALESCE(SUM(pnl_usd) FILTER (WHERE pnl_usd <= 0), 0)::float AS gross_loss
+      FROM v_new_2_paper_trades
     `);
-    if (r[0]) {
-      stats = {
-        totalTrades: r[0].total, open: r[0].open_n,
-        won: r[0].won_n, lost: r[0].lost_n, timeout: r[0].to_n,
-        wr: Number(r[0].wr)||0, pf: Number(r[0].pf)||0, avgPnl: Number(r[0].avg_pnl)||0,
-        totalPnl: Number(r[0].total_pnl_usd)||0,
-        currentEquity: STARTING_EQUITY + (Number(r[0].total_pnl_usd)||0),
-        totalFees: Number(r[0].total_fees)||0,
-      };
+    const opRow: any[] = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::int AS n FROM v_new_2_paper_positions WHERE status = 'open'
+    `);
+    const r = eqRow[0] ?? {};
+    kpi.realizedTrades = Number(r.n_trades || 0);
+    kpi.pnlUsd = Number(r.realized_pnl || 0);
+    kpi.equity = INIT_BALANCE + kpi.pnlUsd;
+    kpi.pnlPct = (kpi.pnlUsd / INIT_BALANCE) * 100;
+    if (kpi.realizedTrades > 0) {
+      kpi.winRate = (Number(r.n_wins) / kpi.realizedTrades) * 100;
+      kpi.avgWinPct = r.avg_win !== null ? Number(r.avg_win) : null;
+      kpi.avgLossPct = r.avg_loss !== null ? Number(r.avg_loss) : null;
+      const grossLoss = Math.abs(Number(r.gross_loss || 0));
+      kpi.profitFactor = grossLoss > 0 ? Number(r.gross_win) / grossLoss : null;
     }
+    kpi.openCount = Number(opRow[0]?.n || 0);
   } catch {}
 
-  // Open positions
-  let openTrades: any[] = [];
+  // ── Open positions ──────────────────────────────────────────────────────
+  let openPositions: any[] = [];
   try {
-    openTrades = await prisma.$queryRawUnsafe(`
-      SELECT id, symbol, direction, ml_prob, entry_time, entry_price,
-        position_usd, tp_price, sl_price
-      FROM paper_trades WHERE status='open' AND threshold = ${threshold}${regimeClause}
-      ORDER BY entry_time DESC
+    openPositions = await prisma.$queryRawUnsafe(`
+      SELECT p.id, p.symbol, p.side, p.is_meme, p.tier, p.entry_time, p.entry_price,
+             p.notional_usd, p.bgm_score, p.running_extreme, p.profit_lock_active,
+             EXTRACT(EPOCH FROM (NOW() - p.entry_time)) / 86400.0 AS days_held
+      FROM v_new_2_paper_positions p
+      WHERE p.status = 'open'
+      ORDER BY p.entry_time DESC
     `);
   } catch {}
 
-  // Equity curve (last 100 closed trades)
-  let equityCurve: any[] = [];
-  try {
-    equityCurve = await prisma.$queryRawUnsafe(`
-      SELECT exit_time, equity_after, pnl_usd, direction
-      FROM paper_trades
-      WHERE status IN ('won','lost','timeout') AND threshold = ${threshold}${regimeClause}
-      ORDER BY exit_time DESC LIMIT 100
-    `);
-    equityCurve = [...equityCurve].reverse();
-  } catch {}
-
-  // Closed trades (paginated)
+  // ── Last 25 closed trades ──────────────────────────────────────────────
   let closedTrades: any[] = [];
-  let totalClosed = 0;
   try {
-    let wh = `WHERE threshold = ${threshold} AND status IN ('won','lost','timeout')`;
-    if (statusFilter !== "all") wh = `WHERE threshold = ${threshold} AND status = '${statusFilter}'`;
-    if (dirFilter !== "all") wh += ` AND direction = '${dirFilter}'`;
-    wh += regimeClause;
-
-    const cr: any[] = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::int as n FROM paper_trades ${wh}`);
-    totalClosed = cr[0]?.n || 0;
     closedTrades = await prisma.$queryRawUnsafe(`
-      SELECT id, symbol, direction, ml_prob, entry_time, exit_time,
-        entry_price, exit_price, position_usd, pnl_pct, pnl_usd,
-        exit_reason, equity_after, fees_usd
-      FROM paper_trades ${wh}
+      SELECT id, symbol, side, is_meme, tier, entry_time, exit_time,
+             entry_price, exit_price, bars_held, exit_reason,
+             pnl_pct, pnl_usd, bgm_score
+      FROM v_new_2_paper_trades
       ORDER BY exit_time DESC
-      LIMIT ${PER_PAGE} OFFSET ${(page - 1) * PER_PAGE}
+      LIMIT 25
     `);
   } catch {}
 
-  const totalPages = Math.max(1, Math.ceil(totalClosed / PER_PAGE));
-  const totalReturn = (stats.currentEquity / STARTING_EQUITY - 1) * 100;
-  const maxEquity = Math.max(STARTING_EQUITY, ...equityCurve.map((e: any) => Number(e.equity_after) || 0));
-  const minEquity = Math.min(STARTING_EQUITY, ...equityCurve.map((e: any) => Number(e.equity_after) || STARTING_EQUITY));
-
-  // Comparison summary across all thresholds
-  let thresholdSummary: any[] = [];
+  // ── Recent untaken signals (intel) ─────────────────────────────────────
+  let recentSignals: any[] = [];
   try {
-    thresholdSummary = await prisma.$queryRawUnsafe(`
-      SELECT threshold,
-        COUNT(*)::int as trades,
-        COUNT(*) FILTER (WHERE status='open')::int as open_n,
-        COALESCE(ROUND(COUNT(*) FILTER (WHERE status='won')::numeric
-          /GREATEST(COUNT(*) FILTER (WHERE status IN ('won','lost','timeout')),1)*100,1),0) as wr,
-        COALESCE(ROUND(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd>0),0)::numeric
-          /ABS(NULLIF(SUM(pnl_usd) FILTER (WHERE pnl_usd<=0),0))::numeric,2),0) as pf,
-        COALESCE(ROUND(SUM(pnl_usd)::numeric,2),0) as total_pnl,
-        ROUND((100.0 + COALESCE(SUM(pnl_usd),0))::numeric,2) as equity
-      FROM paper_trades WHERE 1=1${regimeClause} GROUP BY threshold ORDER BY threshold DESC
+    recentSignals = await prisma.$queryRawUnsafe(`
+      SELECT id, signal_time, symbol, side, tier, is_meme, bgm_score, taken
+      FROM v_new_2_signals
+      WHERE signal_time >= NOW() - INTERVAL '24 hours'
+      ORDER BY signal_time DESC, bgm_score DESC
+      LIMIT 15
     `);
   } catch {}
 
   return (
-    <div className="space-y-6">
-      <SystemStatus />
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            Paper Trading{" "}
-            <span className="text-sm font-normal text-yellow-400">DRY-RUN · No real orders</span>
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Multi-threshold comparison. Starting equity ${STARTING_EQUITY.toFixed(2)} per threshold
+    <main className="min-h-screen bg-[var(--bg)] text-slate-200">
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Header */}
+        <header className="mb-8">
+          <h1 className="text-2xl font-bold text-slate-100">Paper</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Rules-first paired (long/short). $20 paper balance. Scanner every 4h + executor every 5m.
           </p>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">ML Threshold:</span>
-            <div className="flex gap-1">
-              {THRESHOLDS.map(th => (
-                <Link key={th} href={`/paper?threshold=${th}${regime !== "all" ? `&regime=${regime}` : ""}`}
-                  className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
-                    th === threshold
-                      ? "bg-brand-500 text-white"
-                      : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
-                  }`}>
-                  {th.toFixed(2)}
-                </Link>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Regime:</span>
-            <div className="flex gap-1">
-              {REGIME_OPTIONS.map(r => (
-                <Link key={r.key} href={`/paper?threshold=${threshold}${r.key !== "all" ? `&regime=${r.key}` : ""}`}
-                  title={r.hint}
-                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                    r.key === regime
-                      ? "bg-purple-500 text-white"
-                      : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
-                  }`}>
-                  {r.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+        </header>
 
-      {/* Threshold comparison table */}
-      {thresholdSummary.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <div className="px-4 py-3 border-b border-[var(--border)]">
-            <h2 className="text-sm font-semibold text-slate-200">Threshold Comparison</h2>
+        {/* KPI strip */}
+        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="card p-4">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Equity</div>
+            <div className={`mt-1 text-2xl font-mono font-bold ${classifyPnl(kpi.pnlUsd)}`}>
+              {usd(kpi.equity)}
+            </div>
+            <div className={`text-xs font-mono mt-0.5 ${classifyPnl(kpi.pnlUsd)}`}>
+              {pct(kpi.pnlPct)} ({usd(kpi.pnlUsd)})
+            </div>
           </div>
-          <table className="w-full text-xs">
-            <thead><tr className="border-b border-[var(--border)]">
-              <th className="px-3 py-2 text-left text-slate-500">Threshold</th>
-              <th className="px-3 py-2 text-right text-slate-500">Trades</th>
-              <th className="px-3 py-2 text-right text-slate-500">Open</th>
-              <th className="px-3 py-2 text-right text-slate-500">Win Rate</th>
-              <th className="px-3 py-2 text-right text-slate-500">Profit Factor</th>
-              <th className="px-3 py-2 text-right text-slate-500">PnL</th>
-              <th className="px-3 py-2 text-right text-slate-500">Equity</th>
-            </tr></thead>
-            <tbody>
-              {thresholdSummary.map((row: any) => {
-                const isCurrent = Number(row.threshold) === threshold;
-                return (
-                  <tr key={row.threshold} className={`border-b border-[var(--border)] ${isCurrent ? "bg-brand-500/10" : "hover:bg-slate-800/50"}`}>
-                    <td className="px-3 py-1.5">
-                      <Link href={`/paper?threshold=${row.threshold}${regime !== "all" ? `&regime=${regime}` : ""}`} className={`font-mono ${isCurrent ? "text-brand-400 font-bold" : "text-slate-300 hover:text-white"}`}>
-                        {Number(row.threshold).toFixed(2)} {isCurrent ? "◄" : ""}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">{row.trades}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-blue-400">{row.open_n}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">{Number(row.wr).toFixed(1)}%</td>
-                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.pf) >= 1.5 ? "text-green-400" : Number(row.pf) >= 1 ? "text-yellow-400" : "text-red-400"}`}>{Number(row.pf).toFixed(2)}</td>
-                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.total_pnl) >= 0 ? "text-green-400" : "text-red-400"}`}>${Number(row.total_pnl).toFixed(2)}</td>
-                    <td className={`px-3 py-1.5 text-right font-mono ${Number(row.equity) >= 100 ? "text-green-400" : "text-red-400"}`}>${Number(row.equity).toFixed(2)}</td>
+          <div className="card p-4">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Open / Realized</div>
+            <div className="mt-1 text-2xl font-mono font-bold text-slate-100">
+              {kpi.openCount} <span className="text-slate-500 text-base">/ {kpi.realizedTrades}</span>
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">positions / trades</div>
+          </div>
+          <div className="card p-4">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Win Rate</div>
+            <div className="mt-1 text-2xl font-mono font-bold text-slate-100">
+              {kpi.winRate !== null ? `${kpi.winRate.toFixed(1)}%` : "—"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {kpi.avgWinPct !== null && kpi.avgLossPct !== null
+                ? `+${kpi.avgWinPct.toFixed(1)}% / ${kpi.avgLossPct.toFixed(1)}%`
+                : "no trades yet"}
+            </div>
+          </div>
+          <div className="card p-4">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Profit Factor</div>
+            <div className="mt-1 text-2xl font-mono font-bold text-slate-100">
+              {kpi.profitFactor !== null ? kpi.profitFactor.toFixed(2) : "—"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">gross W / gross L</div>
+          </div>
+        </section>
+
+        {/* Open positions */}
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-slate-200 mb-3">
+            Open positions <span className="text-slate-500">({openPositions.length})</span>
+          </h2>
+          <div className="card overflow-hidden p-0">
+            {openPositions.length === 0 ? (
+              <div className="px-4 py-6 text-xs text-slate-500 text-center">
+                No open positions.
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-[var(--bg-subtle)]">
+                  <tr className="border-b border-[var(--border)] text-slate-500">
+                    <th className="px-3 py-2 text-left">Symbol</th>
+                    <th className="px-3 py-2 text-left">Side</th>
+                    <th className="px-3 py-2 text-left">Tier</th>
+                    <th className="px-3 py-2 text-right">Entry</th>
+                    <th className="px-3 py-2 text-right">Notional</th>
+                    <th className="px-3 py-2 text-right">BGM</th>
+                    <th className="px-3 py-2 text-right">Held</th>
+                    <th className="px-3 py-2 text-right">PL Lock</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                </thead>
+                <tbody>
+                  {openPositions.map((p: any) => (
+                    <tr key={p.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-subtle)]">
+                      <td className="px-3 py-2 font-mono text-slate-200">
+                        {p.symbol}
+                        {p.is_meme && <span className="ml-1 text-[9px] text-pink-400">MEME</span>}
+                      </td>
+                      <td className={`px-3 py-2 font-mono ${p.side === "long" ? "text-green-400" : "text-red-400"}`}>
+                        {p.side}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">{p.tier}</td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        {Number(p.entry_price).toFixed(6)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        ${Number(p.notional_usd).toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-brand-400">
+                        {p.bgm_score !== null ? Number(p.bgm_score).toFixed(3) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-400">
+                        {Number(p.days_held).toFixed(1)}d
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {p.profit_lock_active ? (
+                          <span className="text-yellow-400">ARMED</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
 
-      {/* Headline KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        <KPI label="Current Equity" value={`$${stats.currentEquity.toFixed(2)}`} color={stats.currentEquity >= STARTING_EQUITY ? "green" : "red"} />
-        <KPI label="Total Return" value={`${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(1)}%`} color={totalReturn >= 0 ? "green" : "red"} />
-        <KPI label="Trades" value={`${stats.totalTrades}`} />
-        <KPI label="Open" value={`${stats.open}`} color="brand" />
-        <KPI label="Win Rate" value={`${stats.wr}%`} color={stats.wr > 50 ? "green" : "red"} />
-        <KPI label="Profit Factor" value={stats.pf.toFixed(2)} color={stats.pf > 1.5 ? "green" : "red"} />
-        <KPI label="Fees Paid" value={`$${stats.totalFees.toFixed(2)}`} color="slate" />
+        {/* Closed trades */}
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-slate-200 mb-3">
+            Last {Math.min(25, closedTrades.length)} closed
+          </h2>
+          <div className="card overflow-hidden p-0">
+            {closedTrades.length === 0 ? (
+              <div className="px-4 py-6 text-xs text-slate-500 text-center">
+                No closed trades yet.
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-[var(--bg-subtle)]">
+                  <tr className="border-b border-[var(--border)] text-slate-500">
+                    <th className="px-3 py-2 text-left">Exit Time</th>
+                    <th className="px-3 py-2 text-left">Symbol</th>
+                    <th className="px-3 py-2 text-left">Side</th>
+                    <th className="px-3 py-2 text-right">PnL %</th>
+                    <th className="px-3 py-2 text-right">PnL $</th>
+                    <th className="px-3 py-2 text-right">Bars</th>
+                    <th className="px-3 py-2 text-left">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedTrades.map((t: any) => (
+                    <tr key={t.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-subtle)]">
+                      <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">
+                        {new Date(t.exit_time).toISOString().slice(0, 16).replace("T", " ")}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-slate-200">
+                        {t.symbol}
+                        {t.is_meme && <span className="ml-1 text-[9px] text-pink-400">MEME</span>}
+                      </td>
+                      <td className={`px-3 py-2 font-mono ${t.side === "long" ? "text-green-400" : "text-red-400"}`}>
+                        {t.side}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono font-semibold ${classifyPnl(Number(t.pnl_pct))}`}>
+                        {pct(Number(t.pnl_pct))}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono ${classifyPnl(Number(t.pnl_usd))}`}>
+                        {usd(Number(t.pnl_usd))}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-400">{t.bars_held}</td>
+                      <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">{t.exit_reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+
+        {/* Recent signals */}
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-slate-200 mb-3">
+            Signals (24h) <span className="text-slate-500">— scanner output</span>
+          </h2>
+          <div className="card overflow-hidden p-0">
+            {recentSignals.length === 0 ? (
+              <div className="px-4 py-6 text-xs text-slate-500 text-center">
+                No signals fired in last 24h.
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-[var(--bg-subtle)]">
+                  <tr className="border-b border-[var(--border)] text-slate-500">
+                    <th className="px-3 py-2 text-left">Time</th>
+                    <th className="px-3 py-2 text-left">Symbol</th>
+                    <th className="px-3 py-2 text-left">Side</th>
+                    <th className="px-3 py-2 text-left">Tier</th>
+                    <th className="px-3 py-2 text-right">BGM</th>
+                    <th className="px-3 py-2 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentSignals.map((s: any) => (
+                    <tr key={s.id} className="border-b border-[var(--border)]">
+                      <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">
+                        {new Date(s.signal_time).toISOString().slice(0, 16).replace("T", " ")}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-slate-200">
+                        {s.symbol}
+                        {s.is_meme && <span className="ml-1 text-[9px] text-pink-400">MEME</span>}
+                      </td>
+                      <td className={`px-3 py-2 font-mono ${s.side === "long" ? "text-green-400" : "text-red-400"}`}>
+                        {s.side}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">{s.tier}</td>
+                      <td className="px-3 py-2 text-right font-mono text-brand-400">
+                        {Number(s.bgm_score).toFixed(3)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {s.taken ? (
+                          <span className="text-[10px] text-green-400">TAKEN</span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500">queued</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+
+        <footer className="text-[10px] text-slate-600 text-center pt-6">
+          paper-deploy phase. cron: scanner */4h, executor */5min. abort if equity &lt; $5.
+        </footer>
       </div>
-
-      {/* Equity Curve (simple SVG) */}
-      {equityCurve.length > 1 && (
-        <div className="card p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Equity Curve (last {equityCurve.length} closed trades)</h2>
-          <svg viewBox={`0 0 ${Math.max(equityCurve.length * 6, 100)} 100`} className="w-full h-40" preserveAspectRatio="none">
-            {/* Starting equity line */}
-            <line x1="0" y1="50" x2={Math.max(equityCurve.length * 6, 100)} y2="50" stroke="#334155" strokeWidth="0.3" strokeDasharray="2" />
-            <polyline
-              fill="none"
-              stroke={totalReturn >= 0 ? "#4ade80" : "#f87171"}
-              strokeWidth="1"
-              points={equityCurve.map((e: any, i: number) => {
-                const y = 100 - ((Number(e.equity_after) - minEquity) / Math.max(maxEquity - minEquity, 1)) * 100;
-                return `${i * 6},${y.toFixed(1)}`;
-              }).join(" ")}
-            />
-          </svg>
-          <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>Min: ${minEquity.toFixed(2)}</span>
-            <span>Start: ${STARTING_EQUITY.toFixed(2)}</span>
-            <span>Max: ${maxEquity.toFixed(2)}</span>
-            <span>Now: ${stats.currentEquity.toFixed(2)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Open Positions */}
-      {openTrades.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <div className="px-4 py-3 border-b border-[var(--border)]">
-            <h2 className="text-sm font-semibold text-slate-200">Open Positions ({openTrades.length})</h2>
-          </div>
-          <table className="w-full text-xs">
-            <thead><tr className="border-b border-[var(--border)]">
-              <th className="px-3 py-2 text-left text-slate-500">Entry Time</th>
-              <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
-              <th className="px-3 py-2 text-center text-slate-500">Dir</th>
-              <th className="px-3 py-2 text-right text-slate-500">ML</th>
-              <th className="px-3 py-2 text-right text-slate-500">Entry</th>
-              <th className="px-3 py-2 text-right text-slate-500">Size</th>
-              <th className="px-3 py-2 text-right text-slate-500">TP</th>
-              <th className="px-3 py-2 text-right text-slate-500">SL</th>
-            </tr></thead>
-            <tbody>
-              {openTrades.map((t: any) => (
-                <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
-                  <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
-                  </td>
-                  <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
-                  <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{t.direction.toUpperCase()}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-brand-400">{Number(t.ml_prob).toFixed(2)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.entry_price).toPrecision(4)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.position_usd).toFixed(2)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-green-400">${Number(t.tp_price).toPrecision(4)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-red-400">${Number(t.sl_price).toPrecision(4)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="card p-4">
-        <form className="flex gap-4 items-end flex-wrap">
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Direction</label>
-            <select name="direction" defaultValue={dirFilter} className="bg-slate-800 border border-[var(--border)] rounded px-3 py-1.5 text-sm text-white">
-              <option value="all">All</option>
-              <option value="long">Long</option>
-              <option value="short">Short</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 block mb-1">Status</label>
-            <select name="status" defaultValue={statusFilter} className="bg-slate-800 border border-[var(--border)] rounded px-3 py-1.5 text-sm text-white">
-              <option value="all">All Closed</option>
-              <option value="won">Won</option>
-              <option value="lost">Lost</option>
-              <option value="timeout">Timeout</option>
-            </select>
-          </div>
-          <button type="submit" className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-1.5 rounded text-sm">Filter</button>
-        </form>
-      </div>
-
-      {/* Closed Trades */}
-      <div className="card overflow-hidden p-0">
-        <div className="px-4 py-3 border-b border-[var(--border)] flex justify-between items-center">
-          <h2 className="text-sm font-semibold text-slate-200">Closed Trades ({totalClosed})</h2>
-          <div className="flex items-center gap-2 text-xs">
-            {page > 1 && <Link href={`?page=${page-1}&status=${statusFilter}&direction=${dirFilter}&threshold=${threshold}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Prev</Link>}
-            <span className="text-slate-500">{page}/{totalPages}</span>
-            {page < totalPages && <Link href={`?page=${page+1}&status=${statusFilter}&direction=${dirFilter}&threshold=${threshold}`} className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Next</Link>}
-          </div>
-        </div>
-        {closedTrades.length === 0 ? (
-          <div className="px-4 py-8 text-xs text-slate-500 text-center">No closed trades yet. Scanner or paper executor may not be running.</div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead><tr className="border-b border-[var(--border)]">
-              <th className="px-3 py-2 text-left text-slate-500">Entry</th>
-              <th className="px-3 py-2 text-left text-slate-500">Exit</th>
-              <th className="px-3 py-2 text-left text-slate-500">Symbol</th>
-              <th className="px-3 py-2 text-center text-slate-500">Dir</th>
-              <th className="px-3 py-2 text-right text-slate-500">ML</th>
-              <th className="px-3 py-2 text-right text-slate-500">Entry $</th>
-              <th className="px-3 py-2 text-right text-slate-500">Exit $</th>
-              <th className="px-3 py-2 text-right text-slate-500">Size</th>
-              <th className="px-3 py-2 text-right text-slate-500">PnL%</th>
-              <th className="px-3 py-2 text-right text-slate-500">PnL $</th>
-              <th className="px-3 py-2 text-center text-slate-500">Reason</th>
-              <th className="px-3 py-2 text-right text-slate-500">Equity</th>
-            </tr></thead>
-            <tbody>
-              {closedTrades.map((t: any) => (
-                <tr key={t.id} className="border-b border-[var(--border)] hover:bg-slate-800/50">
-                  <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.entry_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400 font-mono whitespace-nowrap">
-                    {new Date(t.exit_time).toLocaleString("en-CA", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}
-                  </td>
-                  <td className="px-3 py-1.5 text-white font-medium">{t.symbol.replace("USDT", "")}</td>
-                  <td className={`px-3 py-1.5 text-center font-semibold ${t.direction === "long" ? "text-green-400" : "text-red-400"}`}>{t.direction.toUpperCase()}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-brand-400">{Number(t.ml_prob).toFixed(2)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.entry_price).toPrecision(4)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-300">${Number(t.exit_price).toPrecision(4)}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-slate-400">${Number(t.position_usd).toFixed(2)}</td>
-                  <td className={`px-3 py-1.5 text-right font-mono font-bold ${Number(t.pnl_pct) > 0 ? "text-green-400" : "text-red-400"}`}>
-                    {Number(t.pnl_pct) > 0 ? "+" : ""}{(Number(t.pnl_pct) * 100).toFixed(1)}%
-                  </td>
-                  <td className={`px-3 py-1.5 text-right font-mono ${Number(t.pnl_usd) > 0 ? "text-green-400" : "text-red-400"}`}>
-                    {Number(t.pnl_usd) > 0 ? "+" : ""}${Number(t.pnl_usd).toFixed(2)}
-                  </td>
-                  <td className="px-3 py-1.5 text-center">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      t.exit_reason === "take_profit" ? "bg-green-900/50 text-green-400" :
-                      t.exit_reason === "stop_loss" ? "bg-red-900/50 text-red-400" :
-                      "bg-slate-700 text-slate-400"
-                    }`}>{t.exit_reason}</span>
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-white">
-                    ${Number(t.equity_after ?? STARTING_EQUITY).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function KPI({ label, value, color }: { label: string; value: string; color?: string }) {
-  const c = color === "green" ? "text-green-400" : color === "red" ? "text-red-400" :
-            color === "brand" ? "text-brand-400" : color === "slate" ? "text-slate-400" : "text-white";
-  return (
-    <div className="card p-3">
-      <p className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</p>
-      <p className={`text-lg font-bold mt-0.5 ${c}`}>{value}</p>
-    </div>
+    </main>
   );
 }
