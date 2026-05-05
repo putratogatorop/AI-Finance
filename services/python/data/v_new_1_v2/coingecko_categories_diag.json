@@ -1,0 +1,122 @@
+{
+  "memes": {
+    "cg_id": "meme-token",
+    "cg_count": 1000,
+    "mapped_count": 26,
+    "unmapped_sample": [
+      "M",
+      "SPX",
+      "B",
+      "APEPE",
+      "ASTEROID"
+    ]
+  },
+  "rwa": {
+    "cg_id": "real-world-assets-rwa",
+    "cg_count": 952,
+    "mapped_count": 21,
+    "unmapped_sample": [
+      "FIGR_HELOC",
+      "USYC",
+      "BUIDL",
+      "ONDO",
+      "USDY"
+    ]
+  },
+  "ai_tokens": {
+    "cg_id": "artificial-intelligence",
+    "cg_count": 1000,
+    "mapped_count": 35,
+    "unmapped_sample": [
+      "SN0",
+      "KITE",
+      "TAG",
+      "GRASS",
+      "AKT"
+    ]
+  },
+  "depin": {
+    "cg_id": "depin",
+    "cg_count": 241,
+    "mapped_count": 28,
+    "unmapped_sample": [
+      "BDX",
+      "ZBCN",
+      "GRASS",
+      "AKT",
+      "TRAC"
+    ]
+  },
+  "gamefi": {
+    "cg_id": "gaming",
+    "cg_count": 828,
+    "mapped_count": 29,
+    "unmapped_sample": [
+      "9BIT",
+      "UDS",
+      "GMRT",
+      "GOMINING",
+      "FORM"
+    ]
+  },
+  "defi": {
+    "cg_id": "decentralized-finance-defi",
+    "cg_count": 1000,
+    "mapped_count": 77,
+    "unmapped_sample": [
+      "STETH",
+      "WSTETH",
+      "DAI",
+      "RAIN",
+      "SKY"
+    ]
+  },
+  "layer1": {
+    "cg_id": "smart-contract-platform",
+    "cg_count": 700,
+    "mapped_count": 108,
+    "unmapped_sample": [
+      "CC",
+      "TON",
+      "M",
+      "CRO",
+      "MNT"
+    ]
+  },
+  "layer2": {
+    "cg_id": "layer-2",
+    "cg_count": 141,
+    "mapped_count": 20,
+    "unmapped_sample": [
+      "MNT",
+      "POL",
+      "ADI",
+      "WETH",
+      "ZK"
+    ]
+  },
+  "solana_eco": {
+    "cg_id": "solana-ecosystem",
+    "cg_count": 1000,
+    "mapped_count": 49,
+    "unmapped_sample": [
+      "USDT",
+      "USDC",
+      "USDS",
+      "WBTC",
+      "CBBTC"
+    ]
+  },
+  "eth_eco": {
+    "cg_id": "ethereum-ecosystem",
+    "cg_count": 1000,
+    "mapped_count": 140,
+    "unmapped_sample": [
+      "USDT",
+      "USDC",
+      "STETH",
+      "WBT",
+      "USDS"
+    ]
+  }
+}
