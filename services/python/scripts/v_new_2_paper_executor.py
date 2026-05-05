@@ -51,10 +51,10 @@ HARD_TIMEOUT_DAYS = int(os.environ.get("V_NEW_2_PAPER_HARD_TIMEOUT_DAYS", "90"))
 
 # Exit logic constants
 MEME_PROFIT_LOCK_PCT = 20.0        # arm profit-lock at +20%
-MEME_TRAIL_ATR_MULT = 5.0          # 5×ATR trail for memes once running
+MEME_TRAIL_ATR_MULT = 3.0          # 3×ATR trail for memes (OOS sweep: 3x beats 5x, PF 5.60 vs 3.61)
 
 DEFAULT_PROFIT_LOCK_PCT = 30.0     # arm profit-lock at +30% for non-memes
-DEFAULT_TRAIL_ATR_MULT = 3.0       # 3×ATR trail
+DEFAULT_TRAIL_ATR_MULT = 8.0       # 8×ATR trail after profit-lock (OOS sweep: monotonic improvement vs 3x)
 DEFAULT_INITIAL_STOP_ATR = 5.0     # 5×ATR initial stop (no profit-lock yet)
 
 
@@ -241,12 +241,12 @@ def manage_open_positions(engine):
                 if side == "long":
                     stop = new_extreme - trail_dist
                     if latest_close <= stop:
-                        exit_reason = "meme_trail_5atr"
+                        exit_reason = "meme_trail_3atr"
                         exit_price = latest_close
                 else:
                     stop = new_extreme + trail_dist
                     if latest_close >= stop:
-                        exit_reason = "meme_trail_5atr"
+                        exit_reason = "meme_trail_3atr"
                         exit_price = latest_close
             else:
                 # Non-meme: 5×ATR initial, 3×ATR after profit-lock arms
