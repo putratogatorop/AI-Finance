@@ -54,7 +54,7 @@ MEME_PROFIT_LOCK_PCT = 20.0        # arm profit-lock at +20%
 MEME_TRAIL_ATR_MULT = 3.0          # 3×ATR trail for memes (OOS sweep: 3x beats 5x, PF 5.60 vs 3.61)
 
 DEFAULT_PROFIT_LOCK_PCT = 30.0     # arm profit-lock at +30% for non-memes
-DEFAULT_TRAIL_ATR_MULT = 8.0       # 8×ATR trail after profit-lock (OOS sweep: monotonic improvement vs 3x)
+DEFAULT_TRAIL_ATR_MULT = 10.0      # 10×ATR trail after profit-lock (OOS Q1-2026: beats 8x on sum_pnl 96% vs 77% AND PF 4.56 vs 4.44)
 DEFAULT_INITIAL_STOP_ATR = 5.0     # 5×ATR initial stop (no profit-lock yet)
 
 
@@ -249,7 +249,7 @@ def manage_open_positions(engine):
                         exit_reason = "meme_trail_3atr"
                         exit_price = latest_close
             else:
-                # Non-meme: 5×ATR initial, 3×ATR after profit-lock arms
+                # Non-meme: 5×ATR initial stop, widens to 10×ATR trail after profit-lock arms
                 trail_mult = DEFAULT_TRAIL_ATR_MULT if new_pl_active else DEFAULT_INITIAL_STOP_ATR
                 trail_dist = trail_mult * atr_dist_abs
                 if side == "long":
