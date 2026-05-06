@@ -1,0 +1,62 @@
+{
+  "seq_len": 30,
+  "n_features": 6,
+  "features": [
+    "close_ret",
+    "atr14_pct",
+    "d_ema_spread_pct",
+    "trend_strength",
+    "btc_ret_4h",
+    "side_sign"
+  ],
+  "hidden_size": 128,
+  "num_layers": 2,
+  "dropout": 0.3,
+  "label_thresholds": {
+    "cfgi_bear_thr": 26.0,
+    "cfgi_bull_thr": 72.0
+  },
+  "label_names": [
+    "bear",
+    "neutral",
+    "bull_mania"
+  ],
+  "train_cutoff": "2025-01-01 00:00:00+00:00",
+  "val_cutoff": "2026-01-01 00:00:00+00:00",
+  "val_acc": 0.6015,
+  "test_acc": 0.5532,
+  "test_macro_f1": 0.3213,
+  "test_per_class": {
+    "bear": {
+      "precision": 0.9958333333333333,
+      "recall": 0.5275938189845475,
+      "f1": 0.6897546897546899,
+      "support": 906
+    },
+    "neutral": {
+      "precision": 0.16595744680851063,
+      "recall": 0.7878787878787878,
+      "f1": 0.27416520210896306,
+      "support": 99
+    },
+    "bull_mania": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0
+    },
+    "macro_f1": 0.3213066306212176
+  },
+  "oos_pf_stats": {
+    "all_n": 1005,
+    "all_pf": 4.363,
+    "bull_n": 55,
+    "bull_pf": 4.026,
+    "non_bear_n": 525,
+    "non_bear_pf": 5.351,
+    "prob_non_bear_n": 622,
+    "prob_non_bear_pf": 4.532,
+    "prob_bull_n": 86,
+    "prob_bull_pf": 4.327
+  }
+}

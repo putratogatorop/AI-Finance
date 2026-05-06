@@ -1,0 +1,14 @@
+{
+  "cfgi_bear_thr": 26.0,
+  "cfgi_bull_thr": 72.0,
+  "n_features": 6,
+  "seq_len": 30,
+  "features": [
+    "close_ret",
+    "atr14_pct",
+    "d_ema_spread_pct",
+    "trend_strength",
+    "btc_ret_4h",
+    "side_sign"
+  ]
+}
