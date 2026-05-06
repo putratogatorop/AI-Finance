@@ -1,0 +1,25 @@
+{
+  "state_dim": 10,
+  "hidden": 64,
+  "state_features": [
+    "pnl_pct_norm",
+    "bars_held_norm",
+    "atr_pct_norm",
+    "p_bear",
+    "p_neutral",
+    "p_bull",
+    "breadth_up",
+    "btc_ret_norm",
+    "is_meme",
+    "side_sign"
+  ],
+  "exit_threshold": 0.7999999999999998,
+  "test_exit_precision": 0.4139,
+  "test_exit_recall": 0.2426,
+  "test_exit_f1": 0.3059,
+  "oracle_avg_pnl": 7.3101,
+  "clf_avg_pnl": -4.9162,
+  "gate_pass": false,
+  "train_cutoff": "2025-01-01 00:00:00+00:00",
+  "val_cutoff": "2026-01-01 00:00:00+00:00"
+}

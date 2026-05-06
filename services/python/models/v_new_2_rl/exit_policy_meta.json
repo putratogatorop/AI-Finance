@@ -1,0 +1,19 @@
+{
+  "state_dim": 10,
+  "n_actions": 2,
+  "hidden": 64,
+  "state_features": [
+    "pnl_pct_norm",
+    "bars_held_norm",
+    "atr_pct_norm",
+    "p_bear",
+    "p_neutral",
+    "p_bull",
+    "breadth_up",
+    "btc_ret_norm",
+    "is_meme",
+    "side_sign"
+  ],
+  "oracle_test_reward": 0.04341,
+  "policy_test_reward": -0.0216,
+  "gate_pass": 
