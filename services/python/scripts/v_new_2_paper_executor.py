@@ -46,7 +46,7 @@ DRY_RUN = os.environ.get("V_NEW_2_PAPER_DRY_RUN", "0") == "1"
 PAPER_BALANCE_INIT = float(os.environ.get("V_NEW_2_PAPER_BALANCE_INIT", "20.0"))
 RISK_PCT = float(os.environ.get("V_NEW_2_PAPER_RISK_PCT", "5.0"))
 LEVERAGE = float(os.environ.get("V_NEW_2_PAPER_LEVERAGE", "10"))
-MAX_CONCURRENT = int(os.environ.get("V_NEW_2_PAPER_MAX_CONCURRENT", "2"))
+MAX_CONCURRENT = int(os.environ.get("V_NEW_2_PAPER_MAX_CONCURRENT", "5"))
 HARD_TIMEOUT_DAYS = int(os.environ.get("V_NEW_2_PAPER_HARD_TIMEOUT_DAYS", "90"))
 
 # Exit logic constants
