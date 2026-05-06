@@ -65,6 +65,17 @@ DB_URL = os.environ.get("DATABASE_URL",
 THRESHOLD = float(os.environ.get("V_NEW_2_BGM_THRESHOLD", "0.60"))
 DRY_RUN = os.environ.get("V_NEW_2_DRY_RUN", "0") == "1"
 
+# LSTM regime — dynamic threshold adjustment per regime
+LSTM_ENABLED = os.environ.get("V_NEW_2_LSTM_ENABLED", "1") == "1"
+LSTM_DIR = ROOT / "services" / "python" / "models" / "v_new_2_lstm"
+LSTM_SEQ_LEN = 30
+# BGM threshold by regime (bear=tighter, bull_mania=more permissive)
+REGIME_THRESHOLD = {"bear": 0.70, "neutral": 0.60, "bull_mania": 0.50}
+# ATR trail multiplier override for executor (written to signal for executor to read)
+REGIME_MEME_TRAIL   = {"bear": 3.0, "neutral": 3.0,  "bull_mania": 5.0}
+REGIME_NONMEME_TRAIL = {"bear": 8.0, "neutral": 10.0, "bull_mania": 15.0}
+REGIME_NAMES = ["bear", "neutral", "bull_mania"]
+
 EMA_FAST = 20
 EMA_SLOW = 50
 BARS_PER_DAY = 6
@@ -250,6 +261,98 @@ def _detect_trigger(latest, prev, tier, side, is_meme) -> bool:
 
 
 # ─── BGM scoring ────────────────────────────────────────────────────────────
+# ─── LSTM regime loader ──────────────────────────────────────────────────────
+_lstm_cache: dict | None = None
+
+
+def _load_lstm_regime():
+    global _lstm_cache
+    if _lstm_cache is not None:
+        return _lstm_cache
+    try:
+        import torch
+        import torch.nn as nn
+
+        class _LSTMRegime(nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, dropout):
+                super().__init__()
+                self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
+                                    batch_first=True,
+                                    dropout=dropout if num_layers > 1 else 0.0)
+                self.head = nn.Sequential(
+                    nn.Linear(hidden_size, 32), nn.ReLU(),
+                    nn.Dropout(dropout), nn.Linear(32, 3),
+                )
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return self.head(out[:, -1, :])
+
+        with open(LSTM_DIR / "meta.json") as f:
+            cfg = json.load(f)
+        scaler = joblib.load(LSTM_DIR / "scaler.pkl")
+        model = _LSTMRegime(cfg["n_features"], cfg["hidden_size"],
+                             cfg["num_layers"], 0.0)
+        model.load_state_dict(torch.load(LSTM_DIR / "regime_lstm.pt",
+                                          map_location="cpu"))
+        model.eval()
+        _lstm_cache = {"model": model, "scaler": scaler,
+                       "n_features": cfg["n_features"], "torch": torch}
+        log.info("LSTM regime model loaded (hidden=%d layers=%d)",
+                  cfg["hidden_size"], cfg["num_layers"])
+    except Exception as e:
+        log.warning("LSTM regime load failed (%s) — using static threshold", e)
+        _lstm_cache = {}
+    return _lstm_cache
+
+
+def _predict_regime(v2_df: pd.DataFrame, btc_feats: pd.DataFrame,
+                    side: str) -> tuple[str, list[float]]:
+    """Build 30-bar sequence for this symbol and return (regime_name, probs[3]).
+
+    Features (6 per bar, matching training):
+      close_ret, atr14_pct, d_ema_spread_pct, trend_strength, btc_ret_4h, side_sign
+    """
+    lstm = _load_lstm_regime()
+    if not lstm:
+        return "neutral", [0.0, 1.0, 0.0]
+    try:
+        import torch
+        seq_df = v2_df.tail(LSTM_SEQ_LEN).copy()
+        side_sign = 1.0 if side == "long" else -1.0
+
+        cr  = seq_df["close"].pct_change().fillna(0.0).values
+        atr = seq_df["atr14_pct"].fillna(0.02).values
+        ema = seq_df["d_ema_spread_pct"].fillna(0.0).values
+        ts_str = seq_df["trend_strength"].fillna(0.0).values
+
+        # BTC 4h return aligned to sequence timestamps
+        btc_ret = btc_feats["btc_24h_return"].reindex(
+            seq_df.index, method="ffill").fillna(0.0).values / 4.0  # daily→4h approx
+
+        side_arr = np.full(len(seq_df), side_sign)
+        seq = np.stack([cr, atr, ema, ts_str, btc_ret, side_arr], axis=1).astype(np.float32)
+
+        # Pad if shorter than SEQ_LEN
+        if len(seq) < LSTM_SEQ_LEN:
+            pad = LSTM_SEQ_LEN - len(seq)
+            seq = np.pad(seq, ((pad, 0), (0, 0)), mode="constant")
+
+        seq = np.nan_to_num(seq, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Scale + predict
+        _n_f = lstm["n_features"]
+        seq_scaled = lstm["scaler"].transform(seq.reshape(-1, _n_f)).reshape(1, LSTM_SEQ_LEN, _n_f)
+        with torch.no_grad():
+            logits = lstm["model"](torch.tensor(seq_scaled, dtype=torch.float32))
+            probs = torch.softmax(logits, dim=1).numpy()[0].tolist()
+
+        regime_idx = int(np.argmax(probs))
+        return REGIME_NAMES[regime_idx], probs
+    except Exception as e:
+        log.debug("LSTM regime predict error: %s", e)
+        return "neutral", [0.0, 1.0, 0.0]
+
+
 _bgm_models_cache = None
 
 
@@ -360,23 +463,40 @@ def main():
             if latest.get("d_trend_long") == 1: n_trend_long += 1
             if latest.get("d_trend_short") == 1: n_trend_short += 1
 
+            # LSTM regime: run once per symbol (shared for long+short)
+            if LSTM_ENABLED:
+                regime, regime_probs = _predict_regime(v2_df, btc_feats, "long")
+            else:
+                regime, regime_probs = "neutral", [0.0, 1.0, 0.0]
+
             for side in ["long", "short"]:
                 if not _detect_trigger(latest, prev, tier, side, is_meme):
                     continue
                 if side == "long": n_triggers_long += 1
                 else: n_triggers_short += 1
+
+                # Dynamic BGM threshold based on LSTM regime
+                eff_threshold = REGIME_THRESHOLD.get(regime, THRESHOLD) if LSTM_ENABLED else THRESHOLD
+
                 bgm = _score_bgm(latest.to_dict(), tier, side)
-                if bgm >= THRESHOLD: n_bgm_pass += 1
-                if bgm < THRESHOLD:
-                    log.info("  near-miss: %s %s tier=%s meme=%s bgm=%.3f pb=%.2f",
-                              sym, side, tier, is_meme, bgm,
+                if bgm >= eff_threshold: n_bgm_pass += 1
+                if bgm < eff_threshold:
+                    log.info("  near-miss: %s %s tier=%s meme=%s bgm=%.3f thr=%.2f regime=%s pb=%.2f",
+                              sym, side, tier, is_meme, bgm, eff_threshold, regime,
                               float(latest.get("pullback_pct" if side == "long" else "rise_pct", 0) or 0))
                     continue
                 n_signals += 1
-                log.info("  SIGNAL: %s %s tier=%s meme=%s bgm=%.3f close=%.6f pullback_pct=%.2f",
-                          sym, side, tier, is_meme, bgm,
-                          float(latest.get("close", 0)),
-                          float(latest.get("pullback_pct", 0)))
+
+                # Regime-adjusted ATR trail multipliers (for executor to read)
+                regime_meme_trail    = REGIME_MEME_TRAIL.get(regime, 3.0)
+                regime_nonmeme_trail = REGIME_NONMEME_TRAIL.get(regime, 10.0)
+
+                log.info("  SIGNAL: %s %s tier=%s meme=%s bgm=%.3f regime=%s(%.2f/%.2f/%.2f) "
+                          "thr=%.2f trail=%.0f/%.0f close=%.6f",
+                          sym, side, tier, is_meme, bgm, regime,
+                          regime_probs[0], regime_probs[1], regime_probs[2],
+                          eff_threshold, regime_meme_trail, regime_nonmeme_trail,
+                          float(latest.get("close", 0)))
                 if DRY_RUN:
                     continue
                 with engine.connect() as c:
@@ -384,9 +504,13 @@ def main():
                         INSERT INTO v_new_2_signals
                             (signal_time, symbol, side, tier, is_meme,
                              pullback_pct, pullback_atr, bgm_score,
-                             d_ema_spread, close_at_signal)
+                             d_ema_spread, close_at_signal,
+                             lstm_regime, lstm_p_bear, lstm_p_neutral, lstm_p_bull,
+                             regime_meme_trail, regime_nonmeme_trail)
                         VALUES (:ts, :sym, :side, :tier, :ismeme,
-                                :pb_pct, :pb_atr, :bgm, :spread, :close)
+                                :pb_pct, :pb_atr, :bgm, :spread, :close,
+                                :regime, :p_bear, :p_neutral, :p_bull,
+                                :meme_trail, :nonmeme_trail)
                         ON CONFLICT (signal_time, symbol, side) DO NOTHING
                     """), {
                         "ts": pd.Timestamp(latest_ts).to_pydatetime(),
@@ -396,6 +520,12 @@ def main():
                         "bgm": float(bgm),
                         "spread": float(latest.get("d_ema_spread_pct", 0) or 0),
                         "close": float(latest.get("close", 0)),
+                        "regime": regime,
+                        "p_bear": float(regime_probs[0]),
+                        "p_neutral": float(regime_probs[1]),
+                        "p_bull": float(regime_probs[2]),
+                        "meme_trail": float(regime_meme_trail),
+                        "nonmeme_trail": float(regime_nonmeme_trail),
                     })
                     c.commit()
         except Exception as e:

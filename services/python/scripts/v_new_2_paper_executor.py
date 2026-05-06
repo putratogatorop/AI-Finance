@@ -131,7 +131,8 @@ def open_new_positions(engine):
     with engine.connect() as c:
         rows = c.execute(text("""
             SELECT id, signal_time, symbol, side, tier, is_meme, bgm_score,
-                   d_ema_spread, close_at_signal, pullback_pct, pullback_atr
+                   d_ema_spread, close_at_signal, pullback_pct, pullback_atr,
+                   lstm_regime, regime_meme_trail, regime_nonmeme_trail
             FROM v_new_2_signals
             WHERE taken = FALSE
               AND signal_time >= NOW() - INTERVAL '8 hours'
@@ -150,12 +151,15 @@ def open_new_positions(engine):
         sig_id = r[0]
         sig_time, sym, side, tier, is_meme, bgm = r[1], r[2], r[3], r[4], r[5], r[6]
         signal_close = float(r[8])
+        lstm_regime       = r[11] or "neutral"
+        regime_meme_trail    = float(r[12]) if r[12] is not None else MEME_TRAIL_ATR_MULT
+        regime_nonmeme_trail = float(r[13]) if r[13] is not None else DEFAULT_TRAIL_ATR_MULT
 
-        # Use signal_close as entry_price (paper, no slippage modeled here yet)
         entry_price = signal_close
         entry_time = pd.Timestamp(sig_time).to_pydatetime()
-        log.info("[open] %s %s tier=%s meme=%s bgm=%.3f notional=$%.2f entry=%.6f",
-                  sym, side, tier, is_meme, float(bgm), notional, entry_price)
+        log.info("[open] %s %s tier=%s meme=%s bgm=%.3f regime=%s trail=%.0f/%.0f notional=$%.2f entry=%.6f",
+                  sym, side, tier, is_meme, float(bgm), lstm_regime,
+                  regime_meme_trail, regime_nonmeme_trail, notional, entry_price)
 
         if DRY_RUN:
             continue
@@ -165,16 +169,21 @@ def open_new_positions(engine):
                 INSERT INTO v_new_2_paper_positions
                   (signal_id, symbol, side, is_meme, tier, entry_time, entry_price,
                    bgm_score, position_size_pct, leverage, notional_usd,
-                   account_at_entry, running_extreme, profit_lock_active, status)
+                   account_at_entry, running_extreme, profit_lock_active, status,
+                   lstm_regime, regime_meme_trail, regime_nonmeme_trail)
                 VALUES (:sid, :sym, :side, :ismeme, :tier, :ts, :entry,
                         :bgm, :pct, :lev, :notional,
-                        :acct, :extreme, FALSE, 'open')
+                        :acct, :extreme, FALSE, 'open',
+                        :regime, :meme_trail, :nonmeme_trail)
             """), {
                 "sid": sig_id, "sym": sym, "side": side, "ismeme": bool(is_meme),
                 "tier": tier, "ts": entry_time, "entry": entry_price,
                 "bgm": float(bgm), "pct": RISK_PCT, "lev": LEVERAGE,
                 "notional": notional, "acct": equity,
                 "extreme": entry_price,
+                "regime": lstm_regime,
+                "meme_trail": regime_meme_trail,
+                "nonmeme_trail": regime_nonmeme_trail,
             })
             c.execute(text("UPDATE v_new_2_signals SET taken=TRUE WHERE id=:id"), {"id": sig_id})
             c.commit()
@@ -185,7 +194,8 @@ def manage_open_positions(engine):
     with engine.connect() as c:
         rows = c.execute(text("""
             SELECT id, symbol, side, is_meme, tier, entry_time, entry_price,
-                   running_extreme, profit_lock_active, notional_usd, bgm_score
+                   running_extreme, profit_lock_active, notional_usd, bgm_score,
+                   lstm_regime, regime_meme_trail, regime_nonmeme_trail
             FROM v_new_2_paper_positions
             WHERE status = 'open'
             ORDER BY entry_time ASC
@@ -199,6 +209,9 @@ def manage_open_positions(engine):
     for r in rows:
         pos_id, sym, side, is_meme, tier, entry_time, entry_price = r[0], r[1], r[2], r[3], r[4], r[5], r[6]
         running_extreme, pl_active, notional, bgm = r[7], r[8], r[9], r[10]
+        # Per-position LSTM regime trail (falls back to global constants if NULL)
+        pos_meme_trail    = float(r[12]) if r[12] is not None else MEME_TRAIL_ATR_MULT
+        pos_nonmeme_trail = float(r[13]) if r[13] is not None else DEFAULT_TRAIL_ATR_MULT
 
         latest_ts, latest_close, atr14_pct = _fetch_latest_4h_close(engine, sym)
         if latest_close is None:
@@ -237,20 +250,20 @@ def manage_open_positions(engine):
         if exit_reason is None and atr14_pct is not None and atr14_pct > 0:
             atr_dist_abs = (atr14_pct / 100.0) * float(entry_price)
             if is_meme:
-                trail_dist = MEME_TRAIL_ATR_MULT * atr_dist_abs
+                trail_dist = pos_meme_trail * atr_dist_abs
                 if side == "long":
                     stop = new_extreme - trail_dist
                     if latest_close <= stop:
-                        exit_reason = "meme_trail_3atr"
+                        exit_reason = f"meme_trail_{pos_meme_trail:.0f}atr"
                         exit_price = latest_close
                 else:
                     stop = new_extreme + trail_dist
                     if latest_close >= stop:
-                        exit_reason = "meme_trail_3atr"
+                        exit_reason = f"meme_trail_{pos_meme_trail:.0f}atr"
                         exit_price = latest_close
             else:
-                # Non-meme: 5×ATR initial stop, widens to 10×ATR trail after profit-lock arms
-                trail_mult = DEFAULT_TRAIL_ATR_MULT if new_pl_active else DEFAULT_INITIAL_STOP_ATR
+                # Non-meme: DEFAULT_INITIAL_STOP_ATR initial, widens to pos_nonmeme_trail after profit-lock
+                trail_mult = pos_nonmeme_trail if new_pl_active else DEFAULT_INITIAL_STOP_ATR
                 trail_dist = trail_mult * atr_dist_abs
                 if side == "long":
                     stop = new_extreme - trail_dist
