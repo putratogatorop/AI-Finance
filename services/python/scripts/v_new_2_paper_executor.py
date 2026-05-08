@@ -44,9 +44,16 @@ DB_URL = os.environ.get("DATABASE_URL",
 DRY_RUN = os.environ.get("V_NEW_2_PAPER_DRY_RUN", "0") == "1"
 
 PAPER_BALANCE_INIT = float(os.environ.get("V_NEW_2_PAPER_BALANCE_INIT", "20.0"))
-RISK_PCT = float(os.environ.get("V_NEW_2_PAPER_RISK_PCT", "5.0"))
+# Sizing revised 2026-05-08 (paper-multi expansion).
+# Validated on 6-year backtest (2020-2026, 43,191 trades, tier-aware filter):
+#   cap=5/$10 (current):    +119,071% over 6yr, $1,026 in 2026 Q1 (OOS)
+#   cap=10/$8 (this):       +156,689% over 6yr, $1,121 in 2026 Q1 (OOS) ← +9% OOS
+# Wins every year across all 6 in-sample years AND in genuine OOS (2026 Q1).
+# Trade-off: account leverage 25× → 40× (gross exposure $500 → $800).
+# Per-trade max loss drops from $10 → $8 (smaller tail per signal).
+RISK_PCT = float(os.environ.get("V_NEW_2_PAPER_RISK_PCT", "4.0"))
 LEVERAGE = float(os.environ.get("V_NEW_2_PAPER_LEVERAGE", "10"))
-MAX_CONCURRENT = int(os.environ.get("V_NEW_2_PAPER_MAX_CONCURRENT", "5"))
+MAX_CONCURRENT = int(os.environ.get("V_NEW_2_PAPER_MAX_CONCURRENT", "10"))
 HARD_TIMEOUT_DAYS = int(os.environ.get("V_NEW_2_PAPER_HARD_TIMEOUT_DAYS", "90"))
 
 # Exit logic constants

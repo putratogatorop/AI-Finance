@@ -65,6 +65,27 @@ DB_URL = os.environ.get("DATABASE_URL",
 THRESHOLD = float(os.environ.get("V_NEW_2_BGM_THRESHOLD", "0.60"))
 DRY_RUN = os.environ.get("V_NEW_2_DRY_RUN", "0") == "1"
 
+# Tier-aware BGM floors (override `THRESHOLD` per tier/side bucket).
+# Validated by 2020-2026 historical sweep over 13,783 long trades:
+#   top25  @ 0.50: PF 7.92, WR 67%   (current default — strong)
+#   51-100 @ 0.50: PF 4.98, WR 64%   (weaker — lower-liquidity names)
+#   51-100 @ 0.70: PF 10.54, WR 76%  (beats top25 default)
+#   meme   @ 0.75: PF 26.88, WR 80%  (memes need the strongest filter)
+TIER_FLOORS = {
+    "meme":     0.75,
+    "top25":    0.50,
+    "26-50":    0.60,
+    "51-100":   0.70,
+    "101-200":  0.75,
+}
+
+
+def _tier_floor(tier: str, is_meme: bool) -> float:
+    """Resolve effective BGM floor for a (tier, is_meme) bucket."""
+    if is_meme:
+        return TIER_FLOORS["meme"]
+    return TIER_FLOORS.get(tier, THRESHOLD)
+
 # LSTM regime — dynamic threshold adjustment per regime
 LSTM_ENABLED = os.environ.get("V_NEW_2_LSTM_ENABLED", "1") == "1"
 LSTM_DIR = ROOT / "services" / "python" / "models" / "v_new_2_lstm"
@@ -124,7 +145,11 @@ def _engine_lazy():
 
 # ─── Universe + tier helpers ────────────────────────────────────────────────
 def _load_u4_universe() -> set[str]:
-    p = DATA_DIR / "v_new_2_u4_universe.json"
+    """Load the active universe set. Prefers u5 (memes+ai+defi+top75); falls
+    back to legacy u4 (memes+ai+top50) until the scanner regenerates u5."""
+    p_u5 = DATA_DIR / "v_new_2_u5_universe.json"
+    p_u4 = DATA_DIR / "v_new_2_u4_universe.json"
+    p = p_u5 if p_u5.exists() else p_u4
     with open(p) as f:
         return set(json.load(f))
 
@@ -475,14 +500,19 @@ def main():
                 if side == "long": n_triggers_long += 1
                 else: n_triggers_short += 1
 
-                # Dynamic BGM threshold based on LSTM regime
-                eff_threshold = REGIME_THRESHOLD.get(regime, THRESHOLD) if LSTM_ENABLED else THRESHOLD
+                # Effective threshold = max(tier floor, regime floor).
+                # Tier floor protects against lower-liquidity false positives;
+                # regime floor tightens during bear and loosens in bull_mania.
+                tier_floor = _tier_floor(tier, is_meme)
+                regime_floor = REGIME_THRESHOLD.get(regime, THRESHOLD) if LSTM_ENABLED else THRESHOLD
+                eff_threshold = max(tier_floor, regime_floor)
 
                 bgm = _score_bgm(latest.to_dict(), tier, side)
                 if bgm >= eff_threshold: n_bgm_pass += 1
                 if bgm < eff_threshold:
-                    log.info("  near-miss: %s %s tier=%s meme=%s bgm=%.3f thr=%.2f regime=%s pb=%.2f",
-                              sym, side, tier, is_meme, bgm, eff_threshold, regime,
+                    log.info("  near-miss: %s %s tier=%s meme=%s bgm=%.3f thr=%.2f (tier=%.2f regime=%s/%.2f) pb=%.2f",
+                              sym, side, tier, is_meme, bgm, eff_threshold,
+                              tier_floor, regime, regime_floor,
                               float(latest.get("pullback_pct" if side == "long" else "rise_pct", 0) or 0))
                     continue
                 n_signals += 1

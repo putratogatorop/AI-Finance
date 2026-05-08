@@ -127,24 +127,31 @@ def _ensure_signals_table():
 
 
 def _load_universe() -> set[str]:
-    """U4 universe = memes + AI + top-50."""
-    universe_path = DATA_DIR / "v_new_2_u4_universe.json"
+    """U5 universe = memes + AI + defi + top-75 (widened from u4 on 2026-05-08).
+
+    14d backfill showed top performers (UB +144%, AIOT +25%, STRK +20%) live
+    outside top-50 and outside meme/AI categories. Widening top-50 → top-75 and
+    adding `defi` brings tokens like PENDLE, AAVE, UNI, CRV into scan range.
+    Tier-aware BGM floor in scanner_prod compensates for lower-liquidity names.
+    """
+    universe_path = DATA_DIR / "v_new_2_u5_universe.json"
     if universe_path.exists():
         with open(universe_path) as f:
             return set(json.load(f))
-    log.info("U4 universe file missing; building from CG categories + membership")
+    log.info("U5 universe file missing; building from CG categories + membership")
     with open(DATA_DIR / "coingecko_categories.json") as f:
         cats = json.load(f)
     memes = set(cats.get("memes", []))
     ai = set(cats.get("ai_tokens", []))
+    defi = set(cats.get("defi", []))
     mem = pd.read_parquet(DATA_DIR / "universe_top100_membership.parquet")
     avg_rank = mem.groupby("symbol")["rank"].mean()
-    top50 = set(avg_rank[avg_rank <= 50].index)
-    universe = memes | ai | top50
+    top75 = set(avg_rank[avg_rank <= 75].index)
+    universe = memes | ai | defi | top75
     universe_path.parent.mkdir(parents=True, exist_ok=True)
     with open(universe_path, "w") as f:
         json.dump(sorted(universe), f, indent=2)
-    log.info("U4 universe built and cached: %d symbols", len(universe))
+    log.info("U5 universe built and cached: %d symbols", len(universe))
     return universe
 
 
